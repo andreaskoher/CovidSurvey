@@ -1,0 +1,18 @@
+{
+  "logger": {
+    "title": "Remote Sync"
+  },
+  "uploadOnSave": true,
+  "useAtomicWrites": true,
+  "deleteLocal": true,
+  "hostname": "heisenberg.compute.dtu.dk",
+  "target": "/home/ankoh/dev/CovidSurvey/",
+  "ignore": [
+    ".remote-sync.json",
+    ".git/**"
+  ],
+  "username": "ankoh",
+  "watch": [],
+  "useAgent": true,
+  "transport": "scp"
+}

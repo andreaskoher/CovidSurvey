@@ -1,3 +1,7 @@
+using DrWatson
+quickactivate(@__DIR__)
+@show projectdir()
+
 using CovidSurvey
 using Test
 

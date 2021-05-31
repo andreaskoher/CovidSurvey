@@ -1,0 +1,7 @@
+contacts vs mobility
+remaining improvements to the model - share and rank
+survey: contacts vs. symptoms
+survey symptoms vs. Facebook symptoms
+symptoms vs. Corona cases
+survey data exploration 
+contact data vs. mobility -> decay of correlation
