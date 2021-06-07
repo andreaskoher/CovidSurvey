@@ -3,6 +3,11 @@
 *.jl.mem
 /Manifest.toml
 /docs/build/
-/reports/
+*.html
+*.jls
+*.csv
+*.dat
+*.txt
+*.bson
 /out/
 /figures/
