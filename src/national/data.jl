@@ -91,7 +91,7 @@ function surveynorm!(xs)
     xs[i] == 0. && return nothing
     xs ./= abs(xs[i])
     xs .-= xs[i]
-    nothing
+    return nothing
 end
 
 # findall(ismissing, xs[mask])
@@ -141,7 +141,8 @@ function select_predictors(covariates, predictors, num_obs, num_tot)
 
     cov_names = filter(x->x!=="date", names(covariates))
     for k in cov_names
-        covariates[!,k] = preproc(covariates[:,k], num_obs, num_tot; normalize=surveynorm!)
+        surveynorm!(covariates[!,k])
+        # covariates[!,k] = preproc(covariates[:,k], num_obs, num_tot; normalize=surveynorm!)
     end
 
     miss = .!( in.(predictors, Ref(cov_names) ) )
@@ -166,7 +167,6 @@ function nconvolve(f1, f2, ts)
     nbins = length(ts)
     f(τ, t) = f1(τ) * f2(t - τ)
     f3 = zeros(nbins)
-    ts = 1.:1:nbins
     for (i, t) in enumerate(ts)
         integral, err = quadgk(x->f(x, t), 0, t, rtol=1e-8)
         f3[i] = integral
@@ -199,6 +199,14 @@ function inf2death(nbins=75, ihr = 1)
     # Brauer et al.
     # r = vcat([0], 1.5:1:(nbins + .5))
     # diff(cdf.(NegativeBinomial2(21.82, 14.26), r))
+
+    ## S. Abbott
+    # i2o(x) = pdf(LogNormal(1.621, 0.418),x)
+    # o2d(x) = pdf(LogNormalMeanStd(13.1, 11.7),x)
+    # return nconvolve(i2o, o2d, ts)
+
+    ## Nouvelette
+    # GammaMeanStd(18.8, 8.48)
 end
 
 function inf2case(nbins = 30)
@@ -207,6 +215,10 @@ function inf2case(nbins = 30)
     # return diff(cdf.(gamma(5.1, .86), r))
     ## Brauner et al.
     return diff(cdf.(NegativeBinomial2(10.92, 5.41), r))
+    ## S. Abbott
+    # i2o(x) = pdf(LogNormal(1.621, 0.418),x)
+    # o2c(x) = pdf(LogNormalMeanStd(6.5, 17),x)
+    # return nconvolve(i2o, o2c, ts)
 end
 
 """
@@ -214,17 +226,26 @@ seropos()[t] is the probablity of being seropositive t days after infection.
 For details see imperial report 34
 """
 function seropos(nbins=200)
-    λ = 13.3
-    μ = 300 #143.7 - λ
-    κ = 3.67
-    f(x, t, κ, μ, λ) = 1/λ*exp(-x/λ-((t-x)/μ)^κ)
-    c2p(t) = quadgk(x->f(x, t, κ, μ, λ), 0, t, rtol=1e-8)[1]
-    i2c(t) = pdf(gamma(5.1, .86), t)
-    ts = 1.5:1:(nbins + .5)
-    return nconvolve(i2c, c2p, ts)
+    # λ = 13.3
+    # μ = 300 #143.7 - λ
+    # κ = 3.67
+    # f(x, t, κ, μ, λ) = 1/λ*exp(-x/λ-((t-x)/μ)^κ)
+    # c2p(t) = quadgk(x->f(x, t, κ, μ, λ), 0, t, rtol=1e-8)[1]
+    # i2c(t) = pdf(gamma(5.1, .86), t)
+    # ts = 1.5:1:(nbins + .5)
+    # return nconvolve(i2c, c2p, ts)
+
+    i2s = zeros(nbins)
+    delay = 14
+    i2s[delay:end] .= 1.
+    return i2s
 end
 
 function serialinterval(nbins = 30)
+    # plot(LogNormalMeanStd(5.2, 1.52), label="Abbott")
+    # plot!(GammaMeanStd(5.06, 2.11), label="Brauer")
+    # plot!(gamma(6.5, .62), label="Flaxman")
+    #
     # Imperial Reports
     r = vcat([0], 1.5:1:(nbins + .5))
     return diff(cdf.(gamma(6.5, .62), r))
@@ -437,10 +458,12 @@ end
 #     s = innerjoin(s1, s2, on=:date)
 #     s[3:end,:] # skip first for data quality
 # end
-
-function readcovariates(fname, shift_covariates=0)
+function readcovariates(; fname=nothing, shift=0, startdate=nothing, enddate=nothing)
+    isnothing(fname) && (@error "please give a file name to covariates_kwargs")
     df = CSV.File(fname)|>DataFrame
     df.date += Day(shift_covariates)
+    !isnothing(startdate) && filter!(row -> row.date >= Date(startdate), df)
+    !isnothing(enddate) && filter!(row -> row.date <= Date(enddate), df)
     ts = df.date[1] : Day(1) : df.date[end]
     @assert all(df.date .== ts )
     @assert !any( ismissing.(Array(df)) )
@@ -472,9 +495,14 @@ function load_data(
     addseroprev=false,
     addtests=false;
     update=false,
-    fname_covariates = normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
     iar_step = 7,
-    shift_covariates = 1
+    shift_covariates = -1,
+    covariates_kwargs = Dict(
+        :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
+        :shift => 0,
+        :startdate => nothing,
+        :enddate => nothing
+    )
 )
 
     cases = CSV.File(normpath( homedir(), "data/Statens-Serum-Institut/dashboard/Regionalt_DB/08_bekraeftede_tilfaelde_pr_dag_pr_regions.csv" ) ) |>
@@ -514,10 +542,6 @@ function load_data(
     # dk = leftjoin(dk, Rt, on = :date; validate=(true,true))
     # sort!(dk, :date)
 
-    covariates = readcovariates(fname_covariates, shift_covariates)
-    covariates = leftjoin(DataFrame(:date=>dates), covariates, on=:date)
-    sort!(covariates, :date)
-
     num_obs = if isnothing(observations_end)
         num_tot
     else
@@ -554,11 +578,17 @@ function load_data(
         )
 
     if !isnothing(predictors)
+        covariates = National.readcovariates(; covariates_kwargs... )
+        covariates = leftjoin(DataFrame(:date=>dates), covariates, on=:date)
+        sort!(covariates, :date)
+        covariates_start = findfirst(x->!ismissing(x), covariates[:,end]) # NOTE: assiming all covariates start at the same date
+        covariates = covariates[covariates_start:num_obs,:]
+
+        covariates = select_predictors(covariates, predictors, num_obs+shift_covariates, num_tot)
+        covariates = convert(Array{Float64,2}, covariates)
         # preds = select_predictors(dk, predictors, num_obs+shift_covariates, num_tot, surveyvars)
-        preds = select_predictors(covariates, predictors, num_obs+shift_covariates, num_tot)
-        covariates_start = findfirst(x->!ismissing(x), preds[:,end])
-        preds = convert(Array{Float64,2}, preds[covariates_start:end,:] )
-        turing_data[:covariates] = preds
+        # preds = convert(Array{Float64,2}, preds[covariates_start:end,:] )
+        turing_data[:covariates] = covariates
         turing_data[:covariates_start] = covariates_start
     end
 
@@ -575,6 +605,7 @@ function load_data(
         turing_data[:seroprev_idx]  = turing_seroprev.idx
         turing_data[:πs]            = seropos(num_tot)
     end
+
 
     turing_data = (;turing_data...)
     Data(
