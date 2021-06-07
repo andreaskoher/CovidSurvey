@@ -11,3 +11,4 @@
 *.bson
 /out/
 /figures/
+*.svg
