@@ -13,11 +13,10 @@ using PrettyTables
 using DataFrames
 using BSON
 
-using ReverseDiff
 using Memoization
-Turing.emptyrdcache()
-setadbackend(:reversediff)
+using ReverseDiff
 Turing.setrdcache(true)
+setadbackend(:reversediff)
 
 plotlyjs()
 @info "number of threads available: $(nthreads())"
@@ -86,7 +85,7 @@ parsed_args = parse_args(ARGS, argtable)
 # helper functions for parsing
 
 name2model = Dict(
-    # "v1" => National.model_v1,
+    "v3" => National.model_v3,
     "v2" => National.model_v2,
     "gp" => National.model_gp,
     "contacts2" => National.model_contacts_v2,
@@ -99,7 +98,10 @@ name2model = Dict(
     "deaths" => National.model_deaths,
     "cases" => National.model_cases,
     "hospit" => National.model_hospit,
-    "contacts3" => National.model_contacts_v3
+    "contacts3" => National.model_contacts_v3,
+    "parametric-cases" => National.model_parametric_cases,
+    "parametric-hospit" => National.model_parametric_hospit,
+    "parametric-deaths" => National.model_parametric_deaths
 )
 #----------------------------------------------------------------------------
 # load data
@@ -110,9 +112,13 @@ data = National.load_data(
     , parsed_args["cases-start"]
     , parsed_args["hospitalization"]
     , parsed_args["seroprevalence"]
-    ; fname_covariates = normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ) #projectdir("data/Rt_SSI.csv")#normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),#DEBUG)
     , iar_step = 1
-    , shift_covariates = 1 #DEBUG
+    , covariates_kwargs = Dict(
+        :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
+        :shift => -1,
+        :startdate => "2020-11-10",
+        :enddate => "2021-01-13"
+    )
 )
 turing_data = data.turing_data;
 #----------------------------------------------------------------------------
