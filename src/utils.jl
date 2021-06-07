@@ -1,4 +1,16 @@
 """
+Mean standard deviation parametrization:
+
+mean: m = exp(μ+σ^2/2)
+std:  s^2 = [exp(σ^2)-1]exp(2μ+σ^2)
+"""
+function LogNormalMeanStd(m, s)
+    σ = sqrt( log( s^2 / m^2 + 1 ) )
+    μ = log(m) - σ^2/2
+    LogNormal(μ, σ)
+end
+
+"""
     NegativeBinomial2(μ, ϕ)
 
 Mean-variance parameterization of `NegativeBinomial`.
