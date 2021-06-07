@@ -6,6 +6,7 @@
 [![Build Status](https://ci.appveyor.com/api/projects/status/github/andreaskoher/CovidSurvey.jl?svg=true)](https://ci.appveyor.com/project/andreaskoher/CovidSurvey-jl)
 [![Coverage](https://codecov.io/gh/andreaskoher/CovidSurvey.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/andreaskoher/CovidSurvey.jl)
 [![Coverage](https://coveralls.io/repos/github/andreaskoher/CovidSurvey.jl/badge.svg?branch=master)](https://coveralls.io/github/andreaskoher/CovidSurvey.jl?branch=master)
+![Lifecycle](https://img.shields.io/badge/lifecycle-experimental-red.svg)
 
 # The Model:
 
