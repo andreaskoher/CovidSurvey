@@ -11,6 +11,7 @@ using StatsBase
 export
     National,
     Regional,
+    LogNormalMeanStd,
     NegativeBinomial2,
     NegativeBinomial3,
     KLogistic,
