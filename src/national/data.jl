@@ -490,6 +490,12 @@ function get_iar_idx(num_tot, num_obs, start_idx, iar_step)
     iar_idx
 end
 
+function holiday(dates)
+    specialdays = [Date("2020-12-24"), Date("2020-12-25"), Date("2020-12-31"), Date("2021-01-01")]
+    holidays = dates .∈ Ref(specialdays)
+    convert(Vector{Int64}, holidays)
+end
+
 function load_data(
     observations_end=nothing,
     predictors=nothing,
@@ -577,7 +583,8 @@ function load_data(
         :iar_idx                     => iar_idx,
         :lockdown                    => lockdown,
         :num_case_obs                => num_case_obs,
-        :weekday                     => dayofweek.(dates)
+        :weekday                     => dayofweek.(dates),
+        :holiday                     => holiday(dates)
         )
 
     if !isnothing(predictors)

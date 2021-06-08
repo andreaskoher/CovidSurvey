@@ -12,6 +12,8 @@
     iar_index,        # [Vector{Array{Int64,1}}] Macro region index for each state
     lockdown,         # [Int] number of weeks (21)
     num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
+	weekday,
+	holiday,
 	covariates,
 	covariates_start,
 	π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
@@ -117,6 +119,9 @@
 		weekdayeffect[i] = weekdayeffect_simplex[i] * num_days
 	end
 
+	### holiday effect
+	holidayeffect ~ Beta(1,1)
+
     ### 4.2) derive observables from infections
 	ifr       ~ truncated(Normal(6/1000, 3/1000), 1/1000, 10/1000)
 	ihr       ~ truncated(Normal(1/100,1/100),.1/100,5/100)
@@ -131,7 +136,8 @@
     expected_daily_hospit[1] = 1e-15 * newly_infected[1]
     expected_daily_deaths[1] = 1e-15 * newly_infected[1]
 	for t = 2:num_time_steps
-		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * weekdayeffect[weekday[t]]
+		periodiceffect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
+		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * periodiceffect
         expected_daily_hospit[t] = ihr * sum(newly_infected[τ] * i2h[t - τ] for τ = (t - 1):-1:max(t-num_i2h,1))
         expected_daily_deaths[t] = ifr * sum(newly_infected[τ] * i2d[t - τ] for τ = (t - 1):-1:max(t-num_i2d,1))
 	end
@@ -189,6 +195,8 @@ end
     iar_index,        # [Vector{Array{Int64,1}}] Macro region index for each state
     lockdown,         # [Int] number of weeks (21)
     num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
+	weekday,
+	holiday,
 	covariates,
 	covariates_start,
 	π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
@@ -294,6 +302,9 @@ end
 		weekdayeffect[i] = weekdayeffect_simplex[i] * num_days
 	end
 
+	### holiday effect
+	holidayeffect ~ Beta(1,1)
+
     ### 4.2) derive observables from infections
 	ifr       ~ truncated(Normal(6/1000, 3/1000), 1/1000, 10/1000)
 	ihr       ~ truncated(Normal(1/100,1/100),.1/100,5/100)
@@ -308,7 +319,8 @@ end
     expected_daily_hospit[1] = 1e-15 * newly_infected[1]
     expected_daily_deaths[1] = 1e-15 * newly_infected[1]
 	for t = 2:num_time_steps
-		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * weekdayeffect[weekday[t]]
+		periodiceffect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
+		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * periodiceffect
         expected_daily_hospit[t] = ihr * sum(newly_infected[τ] * i2h[t - τ] for τ = (t - 1):-1:max(t-num_i2h,1))
         expected_daily_deaths[t] = ifr * sum(newly_infected[τ] * i2d[t - τ] for τ = (t - 1):-1:max(t-num_i2d,1))
 	end
@@ -358,6 +370,8 @@ end
     iar_index,        # [Vector{Array{Int64,1}}] Macro region index for each state
     lockdown,         # [Int] number of weeks (21)
     num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
+	weekday,
+	holiday,
 	covariates,
 	covariates_start,
 	π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
@@ -463,6 +477,9 @@ end
 		weekdayeffect[i] = weekdayeffect_simplex[i] * num_days
 	end
 
+	### holiday effect
+	holidayeffect ~ Beta(1,1)
+
     ### 4.2) derive observables from infections
 	ifr       ~ truncated(Normal(6/1000, 3/1000), 1/1000, 10/1000)
 	ihr       ~ truncated(Normal(1/100,1/100),.1/100,5/100)
@@ -477,7 +494,8 @@ end
     expected_daily_hospit[1] = 1e-15 * newly_infected[1]
     expected_daily_deaths[1] = 1e-15 * newly_infected[1]
 	for t = 2:num_time_steps
-		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * weekdayeffect[weekday[t]]
+		periodiceffect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
+		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * periodiceffect
         expected_daily_hospit[t] = ihr * sum(newly_infected[τ] * i2h[t - τ] for τ = (t - 1):-1:max(t-num_i2h,1))
         expected_daily_deaths[t] = ifr * sum(newly_infected[τ] * i2d[t - τ] for τ = (t - 1):-1:max(t-num_i2d,1))
 	end

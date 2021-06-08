@@ -13,6 +13,7 @@
     lockdown,         # [Int] number of weeks (21)
     num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
 	weekday,
+	holiday,
 	π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
     hospit,
 	seroprev_mean,
@@ -113,6 +114,9 @@
 		weekdayeffect[i] = weekdayeffect_simplex[i] * num_days
 	end
 
+	### holiday effect
+	holidayeffect ~ Beta(1,1)
+
 	############# 3.) time varying infection ascertainment rate
 	σ_iar      ~ truncated(Normal(0.05, .03), 0, .15)
 	iar0       ~ Beta(1,10)
@@ -132,7 +136,8 @@
     expected_daily_hospit[1] = 1e-15 * newly_infected[1]
     expected_daily_deaths[1] = 1e-15 * newly_infected[1]
 	for t = 2:num_time_steps
-		expected_daily_cases[t]  = iar[t] * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * weekdayeffect[weekday[t]]
+		periodiceffect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
+		expected_daily_cases[t]  = iar[t] * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * periodiceffect
         expected_daily_hospit[t] = ihr * sum(newly_infected[τ] * i2h[t - τ] for τ = (t - 1):-1:max(t-num_i2h,1))
         expected_daily_deaths[t] = ifr * sum(newly_infected[τ] * i2d[t - τ] for τ = (t - 1):-1:max(t-num_i2d,1))
 	end
@@ -144,7 +149,7 @@
 	########### 4.) compare model to observations
 	## 4.1) observe cases
 	if num_case_obs > 0
-		ϕ_c  ~ truncated(Normal(25, 10), 10, 60)
+		ϕ_c  ~ truncated(Normal(25, 10), 10, Inf)
 		ts_c = (num_obs-num_case_obs):num_obs
 		μs_c = expected_daily_cases[ts_c]
 		!all( 0 .< μs_c .< population ) && ( @error "expected_daily_cases < 0"; Turing.@addlogprob! -Inf; return)
@@ -204,6 +209,7 @@ end
     lockdown,         # [Int] number of weeks (21)
     num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
 	weekday,
+	holiday,
 	π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
     hospit,
 	seroprev_mean,
@@ -304,6 +310,9 @@ end
 		weekdayeffect[i] = weekdayeffect_simplex[i] * num_days
 	end
 
+	### holiday effect
+	holidayeffect ~ Beta(1,1)
+
 	############# 3.) time varying infection ascertainment rate
 	σ_iar      ~ truncated(Normal(0.05, .03), 0, .15)
 	iar0       ~ Beta(1,10)
@@ -323,7 +332,8 @@ end
     expected_daily_hospit[1] = 1e-15 * newly_infected[1]
     expected_daily_deaths[1] = 1e-15 * newly_infected[1]
 	for t = 2:num_time_steps
-		expected_daily_cases[t]  = iar[t] * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * weekdayeffect[weekday[t]]
+		periodiceffect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
+		expected_daily_cases[t]  = iar[t] * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * periodiceffect
         expected_daily_hospit[t] = ihr * sum(newly_infected[τ] * i2h[t - τ] for τ = (t - 1):-1:max(t-num_i2h,1))
         expected_daily_deaths[t] = ifr * sum(newly_infected[τ] * i2d[t - τ] for τ = (t - 1):-1:max(t-num_i2d,1))
 	end
@@ -335,7 +345,7 @@ end
 	########### 4.) compare model to observations
 	## 4.1) observe cases
 	if num_case_obs > 0
-		ϕ_c  ~ truncated(Normal(25, 10), 10, 60)
+		ϕ_c  ~ truncated(Normal(25, 10), 10, Inf)
 		ts_c = (num_obs-num_case_obs):num_obs
 		μs_c = expected_daily_cases[ts_c]
 		!all( 0 .< μs_c .< population ) && ( @error "expected_daily_cases < 0"; Turing.@addlogprob! -Inf; return)
@@ -394,6 +404,7 @@ end
     lockdown,         # [Int] number of weeks (21)
     num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
 	weekday,
+	holiday,
 	π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
     hospit,
 	seroprev_mean,
@@ -494,6 +505,9 @@ end
 		weekdayeffect[i] = weekdayeffect_simplex[i] * num_days
 	end
 
+	### holiday effect
+	holidayeffect ~ Beta(1,1)
+
     ### 4.2) derive observables from infections
 	ifr ~ truncated(Normal(6/1000, 3/1000), 1/1000, 10/1000)
 	ihr ~ truncated(Normal(1/100,1/100),.1/100,5/100)
@@ -508,7 +522,8 @@ end
     expected_daily_hospit[1] = 1e-15 * newly_infected[1]
     expected_daily_deaths[1] = 1e-15 * newly_infected[1]
 	for t = 2:num_time_steps
-		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * weekdayeffect[weekday[t]]
+		periodiceffect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
+		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * periodiceffect
         expected_daily_hospit[t] = ihr * sum(newly_infected[τ] * i2h[t - τ] for τ = (t - 1):-1:max(t-num_i2h,1))
         expected_daily_deaths[t] = ifr * sum(newly_infected[τ] * i2d[t - τ] for τ = (t - 1):-1:max(t-num_i2d,1))
 	end
@@ -566,6 +581,7 @@ end
     lockdown,         # [Int] number of weeks (21)
     num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
 	weekday,
+	holiday,
 	π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
     hospit,
 	seroprev_mean,
@@ -666,6 +682,9 @@ end
 		weekdayeffect[i] = weekdayeffect_simplex[i] * num_days
 	end
 
+	### holiday effect
+	holidayeffect ~ Beta(1,1)
+
     ### 4.2) derive observables from infections
 	ifr ~ truncated(Normal(6/1000, 3/1000), 1/1000, 10/1000)
 	ihr ~ truncated(Normal(1/100,1/100),.1/100,5/100)
@@ -680,7 +699,8 @@ end
     expected_daily_hospit[1] = 1e-15 * newly_infected[1]
     expected_daily_deaths[1] = 1e-15 * newly_infected[1]
 	for t = 2:num_time_steps
-		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * weekdayeffect[weekday[t]]
+		periodiceffect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
+		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * periodiceffect
         expected_daily_hospit[t] = ihr * sum(newly_infected[τ] * i2h[t - τ] for τ = (t - 1):-1:max(t-num_i2h,1))
         expected_daily_deaths[t] = ifr * sum(newly_infected[τ] * i2d[t - τ] for τ = (t - 1):-1:max(t-num_i2d,1))
 	end
@@ -716,7 +736,7 @@ end
 ## =============================================================================
 #                      model_deaths
 # ==============================================================================
-@model function model_hospit(
+@model function model_deaths(
 	num_impute,        # [Int] num. of days for which to impute infections
     num_total_days,    # [Int] days of observed data + num. of days to forecast
     cases,            # [AbstractVector{<:AbstractVector{<:Int}}] reported infected
@@ -731,6 +751,7 @@ end
     lockdown,         # [Int] number of weeks (21)
     num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
 	weekday,
+	holiday,
 	π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
     hospit,
 	seroprev_mean,
@@ -831,6 +852,9 @@ end
 		weekdayeffect[i] = weekdayeffect_simplex[i] * num_days
 	end
 
+	### holiday effect
+	holidayeffect ~ Beta(1,1)
+
     ### 4.2) derive observables from infections
 	ifr ~ truncated(Normal(6/1000, 3/1000), 1/1000, 10/1000)
 	ihr ~ truncated(Normal(1/100,1/100),.1/100,5/100)
@@ -845,7 +869,8 @@ end
     expected_daily_hospit[1] = 1e-15 * newly_infected[1]
     expected_daily_deaths[1] = 1e-15 * newly_infected[1]
 	for t = 2:num_time_steps
-		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * weekdayeffect[weekday[t]]
+		periodiceffect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
+		expected_daily_cases[t]  = iar * sum(newly_infected[τ] * i2c[t - τ] for τ = (t - 1):-1:max(t-num_i2c,1)) * periodiceffect
         expected_daily_hospit[t] = ihr * sum(newly_infected[τ] * i2h[t - τ] for τ = (t - 1):-1:max(t-num_i2h,1))
         expected_daily_deaths[t] = ifr * sum(newly_infected[τ] * i2d[t - τ] for τ = (t - 1):-1:max(t-num_i2d,1))
 	end
