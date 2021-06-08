@@ -136,13 +136,16 @@ end
 #     Array( dk[!,predictors] )
 # end
 
-function select_predictors(covariates, predictors, num_obs, num_tot)
+function select_predictors(covariates, predictors, num_obs = nothing, num_tot = nothing)
     predictors = String.(predictors)
 
     cov_names = filter(x->x!=="date", names(covariates))
     for k in cov_names
-        surveynorm!(covariates[!,k])
-        # covariates[!,k] = preproc(covariates[:,k], num_obs, num_tot; normalize=surveynorm!)
+        if isnothing(num_obs) || isnothing(num_tot)
+            surveynorm!(covariates[!,k])
+        else
+            covariates[!,k] = preproc(covariates[:,k], num_obs, num_tot; normalize=surveynorm!)
+        end
     end
 
     miss = .!( in.(predictors, Ref(cov_names) ) )
@@ -461,7 +464,7 @@ end
 function readcovariates(; fname=nothing, shift=0, startdate=nothing, enddate=nothing)
     isnothing(fname) && (@error "please give a file name to covariates_kwargs")
     df = CSV.File(fname)|>DataFrame
-    df.date += Day(shift_covariates)
+    df.date += Day(shift)
     !isnothing(startdate) && filter!(row -> row.date >= Date(startdate), df)
     !isnothing(enddate) && filter!(row -> row.date <= Date(enddate), df)
     ts = df.date[1] : Day(1) : df.date[end]
@@ -496,7 +499,6 @@ function load_data(
     addtests=false;
     update=false,
     iar_step = 7,
-    shift_covariates = -1,
     covariates_kwargs = Dict(
         :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
         :shift => 0,
@@ -575,6 +577,7 @@ function load_data(
         :iar_idx                     => iar_idx,
         :lockdown                    => lockdown,
         :num_case_obs                => num_case_obs,
+        :weekday                     => dayofweek.(dates)
         )
 
     if !isnothing(predictors)
@@ -584,7 +587,7 @@ function load_data(
         covariates_start = findfirst(x->!ismissing(x), covariates[:,end]) # NOTE: assiming all covariates start at the same date
         covariates = covariates[covariates_start:num_obs,:]
 
-        covariates = select_predictors(covariates, predictors, num_obs+shift_covariates, num_tot)
+        covariates = select_predictors(covariates, predictors) #num_obs+shift_covariates, num_tot
         covariates = convert(Array{Float64,2}, covariates)
         # preds = select_predictors(dk, predictors, num_obs+shift_covariates, num_tot, surveyvars)
         # preds = convert(Array{Float64,2}, preds[covariates_start:end,:] )
