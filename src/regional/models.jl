@@ -1,32 +1,209 @@
-# This is the most up-to-date one
+using DistributionsAD
+
+struct RandomWalk{Tn, Ts, Tx} <: ContinuousMultivariateDistribution
+  n::Tn
+  s::Ts
+  x0::Tx
+end
+
+Distributions.rand(rng::AbstractRNG, d::RandomWalk{Tn, Ts, Tx}) where {Tn, Ts, Tx} = begin
+  x = Vector{Tx}(undef, d.n)
+  x[1] = d.x0
+  for i in 2:d.n
+    x[i] = x[i-1] + rand(Normal(0, d.s))
+  end
+  return x
+end
+
+Distributions.logpdf(d::RandomWalk{Tn, Ts, Tx}, x::AbstractVector{T}) where {Tn, Ts, Tx, T} =
+    logpdf( MvNormal( d.n-1, d.s ), diff(x) )# + logpdf( Normal( zero(Ts), x[1] ) )
+
+Bijectors.bijector(d::RandomWalk) = Identity{1}()
+
+Bijectors.bijector( ::DistributionsAD.VectorOfMultivariate{Continuous, RandomWalk{Tn, Ts, Tx}, Vector{RandomWalk{Tn, Ts, Tx}}} ) where {Tn, Ts, Tx} = Identity{2}()
+
+
+Base.length(d::RandomWalk) = d.n
+##
+function random_walks!(Rts, θ, predict, latent_Rts, R0s)
+	@unpack num_regions, rt_step_indices, lockdown_indices, num_observations, link = θ
+
+	for m in 1:num_regions
+		rt_step_index = rt_step_indices[m]
+		Rt            = Rts[m]
+		lockdown      = lockdown_indices[m]
+		num_obs       = num_observations[m]
+		latent_Rt     = latent_Rts[:,m]
+		R0            = R0s[m]
+
+		Rt[1:lockdown] .= R0
+		Rt[lockdown+1:num_obs] = link.(latent_Rt)
+		if predict
+			Rt[num_obs+1:end] = Rt[num_obs]
+		end
+	end
+end
+
+function infections!(newly_infecteds, cumulative_infecteds, θ, τ, ys, Rts)
+	@unpack num_regions, populations = θ
+	for m in 1:num_regions
+		regionaldata = (
+			Rt                     = Rts[m],
+			population             = populations[m],
+			y                      = ys[m]
+		)
+
+		initepidemic!(newly_infecteds[m], cumulative_infecteds[m], θ, regionaldata)
+		runepidemic!(newly_infecteds[m], cumulative_infecteds[m], θ, regionaldata)
+	end
+	return nothing
+end
+
+function initepidemic!(newly_infected, cumulative_infected, θ, regionaldata)
+	@unpack num_impute = θ
+	@unpack y = regionaldata
+	newly_infected[1]      = y
+	cumulative_infected[1] = zero( eltype(cumulative_infected) )
+
+	for t in 2:num_impute
+		newly_infected[t] = y
+		cumulative_infected[t] = cumulative_infected[t-1] + y
+	end
+end
+
+function runepidemic!(newly_infected, cumulative_infected, θ, regionaldata)
+	@unpack num_impute, serial_interval, num_si = θ
+	@unpack population, Rt = regionaldata
+	num_time_step = length(newly_infected)
+
+	for t = (num_impute + 1):num_time_step
+		# Update cumulatively infected
+		cumulative_infected[t] = cumulative_infected[t-1] + newly_infected[t - 1]
+		# Adjusts for portion of population that is susceptible
+		St = max(population - cumulative_infected[t], 0) / population
+		# effective number of infectious individuals
+		effectively_infectious = sum(newly_infected[τ] * serial_interval[t - τ] for τ = (t - 1):-1:max(t-num_si,1))
+		# number of new infections (unobserved)
+		newly_infected[t] = St * Rt[t] * effectively_infectious
+	end
+	return nothing
+end
+
+function infection2hospit(θ, μ_i2h)
+	@unpack ϕ_i2h, num_i2h = θ
+	i2h = pdf.( Ref(NegativeBinomial2(μ_i2h, ϕ_i2h)), 1:num_i2h )
+	i2h /= sum(i2h)
+	return i2h
+end
+
+function hospitalizations!(expected_daily_hospits, θ, μ_i2h, ihr, newly_infecteds)
+	@unpack num_regions, num_i2h = θ
+
+	i2h = infection2hospit(θ, μ_i2h)
+
+	for m in 1:num_regions
+
+		expected_daily_hospit    = expected_daily_hospits[m]
+		newly_infected           = newly_infecteds[m]
+		num_time_step            = length(expected_daily_hospit)
+
+		expected_daily_hospit[1] = 1e-15 * newly_infected[1]
+		for t = 2:num_time_step
+			expected_daily_hospit[t] = ihr * sum(newly_infected[τ] * i2h[t - τ] for τ = (t - 1):-1:max(t-num_i2h,1))
+		end
+	end
+	return nothing
+end
+
+function observe_hospitalizations(ℓ, θ, expected_daily_hospits, ϕ_h)
+	@unpack num_regions, populations, num_observations, hospits, epidemic_start = θ
+
+	T = typeof(ℓ)
+	for m in 1:num_regions
+		population            = populations[m]
+		expected_daily_hospit = expected_daily_hospits[m]
+		num_obs               = num_observations[m]
+		hospit                = hospits[m]
+
+		ts_h  = epidemic_start:num_obs
+		μs_h  = expected_daily_hospit[ts_h]
+		!all( 0 .< μs_h .< population ) && (@error "expected_daily_hospit"; return T(Inf))
+		dist  = arraydist(NegativeBinomial2.(μs_h, ϕ_h))
+		ℓ += logpdf(dist, hospit[ts_h])
+	end
+	return ℓ
+end
+## ============================================================
+@model function model_hospit(
+    θ,     # [Bool] if `false`, will only compute what's needed to `observe` but not more
+    predict,
+	::Type{TV} = Vector{Float64},
+	::Type{V}  = Float64;
+) where {TV, V}
+
+	@unpack num_observations, num_total_days, num_regions, num_rt_steps, invlink = θ
+    # If we don't want to predict the future, we only need to compute up-to time-step `num_obs_countries[m]`
+    num_time_steps = predict ? num_total_days : num_observations
+
+	############# 2.) time varying reproduction number
+
+	R0s        ~ filldist(truncated(Normal(3., 1.), 1., 5.), num_regions)
+	R1s        ~ filldist(truncated(Normal(.8, .1), .5, 1.1), num_regions)
+	σ_rt       ~ truncated(Normal(0.05, .03), 0, .3)
+	latent_Rts ~ arraydist( RandomWalk.(num_rt_steps, Ref(σ_rt), invlink.(R1s)) )
+
+	Rts = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
+
+	random_walks!(Rts, θ, predict, latent_Rts, R0s)
+
+	############ 3.) infection dynamics
+	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
+	T  = typeof(τ)
+	ys ~ filldist(truncated(Exponential(τ),T(0),T(1000)), num_regions)
+
+	newly_infecteds      = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
+	cumulative_infecteds = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
+
+	infections!(newly_infecteds, cumulative_infecteds, θ, τ, ys, Rts)
+
+	########### 4.) derive observables
+    μ_i2h ~ truncated(Normal(12., 3.), 9, 16)
+	ihr   ~ truncated(Normal(1/100,1/100),.1/100,5/100)
+
+	expected_daily_hospits = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
+
+	hospitalizations!(expected_daily_hospits, θ, μ_i2h, ihr, newly_infecteds)
+
+	########### 4.) compare model to observations
+	## 4.1) observe hospitalizations
+	ϕ_h   ~ truncated(Normal(25, 10), 0, Inf)
+	ℓ = zero(V)
+	ℓ += observe_hospitalizations(ℓ, θ, expected_daily_hospits, ϕ_h)
+	Turing.@addlogprob! ℓ
+
+	return (
+		expected_daily_hospits = expected_daily_hospits,
+		Rts = Rts
+	)
+end
+
+
 @model function model_v2(
     num_impute,        # [Int] num. of days for which to impute infections
     num_total_days,    # [Int] days of observed data + num. of days to forecast
     cases,             # [AbstractVector{<:AbstractVector{<:Int}}] reported cases
     deaths,            # [AbstractVector{<:AbstractVector{<:Int}}] reported deaths; rows indexed by i > N contain -1 and should be ignored
     π,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
-    π2,
+    covariates,        # [Vector{<:AbstractMatrix}]
     epidemic_start,    # [AbstractVector{<:Int}]
     population,        # [AbstractVector{<:Real}]
     serial_intervals,  # [AbstractVector{<:Real}] fixed pre-calculated serial interval (SI) using empirical data from Neil
-    num_iar_steps,         # [Int] number of weeks (21)
-    iar_index,        # [Vector{Array{Int64,1}}] Macro region index for each state
-    lockdown,         # [Int] number of weeks (21)
-    num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
-    π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
-    hospit,
-	seroprev_mean,
-    seroprev_std,
-    seroprev_idx,
-	π4,
+    lockdown_index,    # [Int] the index for the `lockdown` covariate in `covariates`
     predict=false,     # [Bool] if `false`, will only compute what's needed to `observe` but not more
-    ::Type{TV} = Vector{Float64},
-	::Type{V}  = Float64;
-	invlink = log,#KLogistic(V(3))
-	link    = exp,#KLogit(V(k))
-) where {TV, V}
-
+    ::Type{TV} = Vector{Float64}
+) where {TV}
     # `covariates` should be of length `num_countries` and each entry correspond to a matrix of size `(num_total_days, num_covariates)`
+    num_covariates = size(covariates[1], 2)
     num_countries = length(cases)
     num_obs_countries = length.(cases)
 
@@ -34,21 +211,16 @@
     last_time_steps = predict ? fill(num_total_days, num_countries) : num_obs_countries
 
     # Latent variables
-	τ         ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
-	T = typeof(τ)
-    y         ~ filldist(truncated(Exponential(τ),T(0),T(1000)), num_countries)
-    ϕ         ~ truncated(Normal(0, 5), 0, Inf)
-	ϕ2        ~ truncated(Normal(25, 5), 10, 40)
-    ϕ3        ~ truncated(Normal(25, 5), 10, 40)
-	R0        ~ truncated(Normal(3.6, .8), 2, 5.)
-	R1        ~ truncated(Normal(.8, .1), .5, 1.1)
-    ifr       ~ truncated(Normal(6/1000, 3/1000), 3/1000, 10/1000)
-	ihr       ~ truncated(Normal(1/100,1/100),.1/100,5/100)
-    iar0      ~ Beta(10,100) #Beta(20,25)
-	σ_rt      ~ truncated(Normal(0.05, .03), 0, .15)
-	σ_iar     ~ truncated(Normal(0.05, .03), 0, .15)
+    τ ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
+    y ~ filldist(Exponential(τ), num_countries)
+    ϕ ~ truncated(Normal(0, 5), 0, Inf)
+    κ ~ truncated(Normal(0, 0.5), 0, Inf)
+    μ ~ filldist(truncated(Normal(3.28, κ), 0, Inf), num_countries)
 
-	seroprev_σ ~ arraydist(InverseGamma2.(seroprev_std, Ref(.1)))
+    α_hier ~ filldist(Gamma(.1667, 1), num_covariates)
+    α = α_hier .- log(1.05) / 6.
+
+    ifr_noise ~ filldist(truncated(Normal(1., 0.1), 0, Inf), num_countries)
 
     # lockdown-related
     γ ~ truncated(Normal(0, 0.2), 0, Inf)
