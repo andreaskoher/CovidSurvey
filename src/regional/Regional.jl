@@ -24,6 +24,7 @@ using QuadGK
 using ..CovidSurvey#: NegativeBinomial2
 
 include("models.jl")
+include("utils.jl")
 include("data.jl")
 include("visualization.jl")
 

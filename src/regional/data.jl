@@ -14,6 +14,10 @@ struct Data
     predictors
     seroprev
     regions
+    lockdown
+    observations_end
+    cases_start
+    startdates
 end
 
 dan2eng = Dict(
@@ -348,13 +352,15 @@ function totaldays(dates, startdates)
     return length.(regional_dates)
 end
 
-function lockdown_index(dates)
+function lockdown!(data, lockdown)
+    @unpack dates_turing = data
     li = Vector{Int64}()
-    for d in dates
-        i = findfirst(==(Date("2020-03-18")), d)
+    for d in dates_turing
+        i = findfirst(==(Date(lockdown)), d)
         push!(li, i)
     end
-    return li
+    data["lockdown_index"] = li
+    return nothing
 end
 
 function turingformat!(data, observations_end = nothing)
@@ -367,7 +373,6 @@ function turingformat!(data, observations_end = nothing)
     data["hospit_turing"] = df2vec(hospit, s, e)
     data["deaths_turing"] = df2vec(deaths, s, e)
     data["num_obs"]  = length.(data["cases_turing"])
-    data["lockdown"] = lockdown_index(data["dates_turing"])
     return nothing
 end
 
@@ -467,10 +472,10 @@ function stepindex(n, stepsize)
 end
 
 function randomwalk!(data, stepsize=1)
-    @unpack num_obs, lockdown = data
+    @unpack num_obs, lockdown_index = data
     ns = Vector{Int64}()
     is = Vector{Vector{Int64}}()
-    for (no, l) in zip(num_obs, lockdown)
+    for (no, l) in zip(num_obs, lockdown_index)
         n = no - l
         i = stepindex(n, stepsize)
         push!(ns, n)
@@ -481,19 +486,15 @@ function randomwalk!(data, stepsize=1)
 end
 
 function load_data(;
-    observations_end=nothing,
-    predictors=nothing,
-    cases_start=nothing,
-    addhospital=true,
-    addseroprev=false,
-    addtests=false,
-    update=false,
-    iar_step = 1,
-    rw_step  = 1,
-    epidemic_start = 30,
-    num_impute = 6,
-    link = exp,
-    invlink = log,
+    observations_end  = nothing,
+    predictors        = nothing,
+    cases_start       = nothing,
+    rw_step           = 1,
+    epidemic_start    = 30,
+    num_impute        = 6,
+    link              = KLogistic(3.),
+    invlink           = KLogit(3.),
+    lockdown          = "2020-03-18",
     covariates_kwargs = Dict(
         :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
         :shift => 0,
@@ -508,6 +509,7 @@ function load_data(;
     turingformat!(data, observations_end)
     cases_start_date!(data, cases_start)
     covariates!(data, predictors; covariates_kwargs...)
+    lockdown!(data, lockdown)
     randomwalk!(data, rw_step)
 
 
@@ -533,7 +535,7 @@ function load_data(;
         populations                 = population,
         serial_interval             = serialinterval(15),#padzeros(serialinterval(30), 0, num_tot), #data_usa.turing_data.serial_intervals[1:50],
         num_si                      = 15,
-        lockdown_indices            = data["lockdown"],
+        lockdown_indices            = data["lockdown_index"],
         cases_start_indices         = data["cases_start_idx"],
         hospits                     = data["hospit_turing"],
         num_rt_steps                = data["num_rt_steps"],
@@ -546,6 +548,9 @@ function load_data(;
         ϕ_i2h                       = 5.41,
     )
 
+    dates = [ collect(d:Day(1):d+Day(n-1)) for (d, n) in zip(data["startdates"], data["num_tot"])]
+    startdates = [d[epidemic_start] for d in dates]
+
     Data(
         turing_data,
         data["cases"],
@@ -553,10 +558,14 @@ function load_data(;
         data["hospit"],
         data["num_obs"], #num_observations
         data["num_tot"],
-        data["startdates"],
+        dates,
         population,
         predictors,
         seroprev,
-        regions
+        regions,
+        lockdown,
+        observations_end,
+        cases_start,
+        startdates
     )
 end
