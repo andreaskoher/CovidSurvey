@@ -24,7 +24,8 @@ Bijectors.bijector( ::DistributionsAD.VectorOfMultivariate{Continuous, RandomWal
 
 
 Base.length(d::RandomWalk) = d.n
-##
+# ============================================================================
+# random walk model
 function random_walks!(Rts, θ, predict, latent_Rts, R0s)
 	@unpack num_regions, rt_step_indices, lockdown_indices, num_observations, link = θ
 
@@ -37,13 +38,15 @@ function random_walks!(Rts, θ, predict, latent_Rts, R0s)
 		R0            = R0s[m]
 
 		Rt[1:lockdown] .= R0
-		Rt[lockdown+1:num_obs] = link.(latent_Rt)
+		Rt[lockdown+1:num_obs] = link.(latent_Rt[rt_step_index])
 		if predict
 			Rt[num_obs+1:end] .= Rt[num_obs]
 		end
 	end
 end
 
+# ============================================================================
+# infection model
 function infections!(newly_infecteds, cumulative_infecteds, θ, τ, ys, Rts)
 	@unpack num_regions, populations = θ
 	for m in 1:num_regions
@@ -124,6 +127,8 @@ function runepidemic!(newly_infected, cumulative_infected, θ, regionaldata)
 	return nothing
 end
 
+# ============================================================================
+# observations
 function infection2hospit(θ, μ_i2h)
 	@unpack ϕ_i2h, num_i2h = θ
 	i2h = pdf.( Ref(NegativeBinomial2(μ_i2h, ϕ_i2h)), 1:num_i2h )
@@ -169,6 +174,8 @@ function observe_hospitalizations(ℓ, θ, expected_daily_hospits, ϕ_h)
 	return ℓ
 end
 
+# ============================================================================
+# post-processing
 function groupregions(gq::NamedTuple)
     ks = keys(gq)
     vs = values(gq)

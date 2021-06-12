@@ -73,12 +73,7 @@ argtable = ArgParseSettings(
         default = nothing
 end
 parsed_args = parse_args(ARGS, argtable)
-#-----------------------------------------------------------------------------
-# helper functions for parsing
 
-name2model = Dict(
-    "hospit" => Regional.model_hospit,
-)
 #----------------------------------------------------------------------------
 # load data
 @info "load data"
@@ -114,7 +109,7 @@ ps[:folder] = parsed_args["foldername"]
 ps[:prefix] = isempty(parsed_args["name-prefix"]) ? "" : parsed_args["name-prefix"]*"-"
 ps = NamedTuple(ps)
 
-const model = name2model[ps.model]
+const model = Regional.name2model[ps.model]
 !isnothing(ps.seed) && Random.seed!(ps.seed);
 @info ps
 m = model(turing_data, false)
@@ -131,7 +126,11 @@ end
 fdir = projectdir("reports/", ps.folder)
 mkpath(fdir)
 @info "Saving at: $fdir"
-safesave( normpath(fdir, ps.prefix*"params.csv"), DataFrame( parameter=collect(keys(ps)), value=collect(values(ps)) ) )
+let
+    dic = Dict( zip( keys(ps), values(ps) ) )
+    safesave( normpath(fdir, ps.prefix*"params.csv"), DataFrame( dic ) )
+    bson( normpath(fdir, ps.prefix*"params.bson") ,  dic )
+end
 #-----------------------------------------------------------------------------
 # save chain
 chain = let
@@ -142,19 +141,34 @@ chain = let
 end
 #-----------------------------------------------------------------------------
 @info "make predictions"
-generated_posterior = let
-    m_pred = model(turing_data, true)
-    gq = Turing.generated_quantities(m_pred, chain)
-    vectup2tupvec(reshape(gq, length(gq)))
-end
-#-----------------------------------------------------------------------------
-@info "store generated quantities"
-# observed_daily_cases, expected_daily_deaths, expected_daily_hospit, Rt, expected_seropositive, iar = generated_posterior
+generated_posterior = Regional.posterior(model, turing_data, chain)
 let
     fname = normpath( fdir, savename(ps.prefix*"GENERATED-QUANTITIES", ps, "bson") )
-    dic = Dict( zip( keys(ps), values(ps) ) )
+    dic = Dict( zip( keys(generated_posterior), values(generated_posterior) ) )
     bson( fname ,  dic )
 end
+## ==========================================================================
+@info "plot regions"
+for r in Regional.regions
+    recipe = Regional.RegionPlottingRecipe(data, generated_posterior, r)
+    p = plot(recipe)
+    savefig( p, savename(ps.prefix*"FIG-$(uppercase(r))", ps, "html") )
+end
+##
+@info "plot rt"
+let
+    recipe = Regional.RtsPlottingRecipe(data, generated_posterior)
+    p = plot(recipe)
+    savefig( p, savename(ps.prefix*"FIG-RT", ps, "html") )
+end
+##
+@info "plot hospitalizations"
+let
+    recipe = Regional.HospitsPlottingRecipe(data, generated_posterior)
+    p = plot(recipe)
+    savefig( p, savename(ps.prefix*"FIG-HOSPIT", ps, "html") )
+end
+
 #-----------------------------------------------------------------------------
 # @info "store reproduction number"
 # rt = let
@@ -170,16 +184,6 @@ end
 # end
 # fname = normpath( fdir, savename(ps.prefix*"Rt", ps, "csv") )
 # save(fname, rt)
-#-----------------------------------------------------------------------------
-# @info "plot results"
-# expected_daily_hospits = expected_daily_hospits,
-# Rts = Rts
-#
-# p = National.plot_results(data, generated_posterior...);
-# fname = normpath( fdir, savename(ps.prefix*"PREDICTION", ps, "html") )
-# savefig(p, fname )
-# # savefig(p, projectdir("figures", fname*".png") )
-# parsed_args["plot-results"] && run(`firefox $(fname)`, wait=false)
 
 #-----------------------------------------------------------------------------
 # perform diagnostics
