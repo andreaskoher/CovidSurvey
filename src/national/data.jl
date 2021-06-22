@@ -1,6 +1,6 @@
-#----------------------------------------------------------------------------
-# load data from Imperial College
-struct Data
+const population = 5_837_213
+
+struct Data1
     turing_data
     cases
     deaths
@@ -11,6 +11,10 @@ struct Data
     pop
     predictors
     seroprev
+    lockdown
+    observations_end
+    cases_start
+    startdates
 end
 
 dan2eng = Dict(
@@ -245,15 +249,13 @@ function seropos(nbins=200)
 end
 
 function serialinterval(nbins = 30)
-    # plot(LogNormalMeanStd(5.2, 1.52), label="Abbott")
-    # plot!(GammaMeanStd(5.06, 2.11), label="Brauer")
-    # plot!(gamma(6.5, .62), label="Flaxman")
-    #
-    # Imperial Reports
+    # Imperial Report
     r = vcat([0], 1.5:1:(nbins + .5))
-    return diff(cdf.(gamma(6.5, .62), r))
+    # diff(cdf.(GammaMeanStd(6.5, .62), r))
+    # return p / sum(p)
     ## Brauer et al. Science (2020)
-    #return diff(cdf.(gamma(5.06, 2.11/5.06), r))
+    p = diff(cdf.(GammaMeanStd(5.06, 2.11), r))
+    return p# / sum(p)
 end
 
 # function inf2serocon(nbins)
@@ -337,12 +339,6 @@ end
 #     hosp
 # end
 
-function startdate(deaths)
-    cumulative = cumsum(deaths.country)
-    i = findfirst(>=(10), cumulative)
-    deaths.date[i] - Day(30)
-end
-
 enddate(df1, df2) = min(df1.date[end], df2.date[end])
 enddate(df, args...) = min(df.date[end], enddate(args...))
 
@@ -386,27 +382,22 @@ end
 
 # ≈ 15days delay from infection to antibody production
 # see Ferguson Report and Zhao 2020: "Antibody responses to SARS-CoV-2 in patients of novel coronavirus disease 2019"
-function readseroprev(dates)
+function seroprev!(data; later_dataset = true)
+    @unpack dates_turing = data
     df0 = CSV.File(projectdir("data/seroprevalence/", "seroprev_early.csv"), delim="\t")|>DataFrame
     df1 = CSV.File(projectdir("data/seroprevalence/", "seroprev.csv"), delim="\t")|>DataFrame
     df1[!,:date] = df1.week .|> parseweek
     select!(df1, Not(:week))
-    df = vcat(df0, df1)
-    # df = df0
-    df = df[ dates[1] .<= df.date .<= dates[end], :]
-    # df.date .-= Day(delay)
+    df = later_dataset ? vcat(df0, df1) : df0
+    df = df[ dates_turing[1] .<= df.date .<= dates_turing[end], :]
     parsepercent!(df)
     df.CI = df.CI .|> parseCI
-    # df[!,:std_u] = [(CIs[i][2] - df.country[i]) / 1.96 for i in 1:length(CIs)]
-    # estimates of std are not symmetric with respect to lower / upper CI bound
-    # we choose the larger estimate, i.e. the lower bound
     df[!,:std] = [max( abs.(df.country[i] .- df.CI[i])... ) / 1.96 for i in 1:length(df.CI)]
-    turing_data = (
-        std  = df.std,
-        mean = df.country,
-        idx  = [findfirst(==(d), dates) for d in df.date]
-    )
-    df, turing_data
+    data["seroprev_std"]  = df.std
+    data["seroprev_mean"] = df.country
+    data["seroprev_idx"]  = [findfirst(==(d), dates) for d in df.date]
+    data["seroprev"]      = df
+    return nothing
 end
 
 function parsepercent(x::String)
@@ -461,21 +452,21 @@ end
 #     s = innerjoin(s1, s2, on=:date)
 #     s[3:end,:] # skip first for data quality
 # end
-function readcovariates(; fname=nothing, shift=0, startdate=nothing, enddate=nothing)
+function readcovariates(; fname=nothing, shift=0, startdate=nothing, enddate=nothing, datecol=:dates)
     isnothing(fname) && (@error "please give a file name to covariates_kwargs")
     df = CSV.File(fname)|>DataFrame
-    df.date += Day(shift)
-    !isnothing(startdate) && filter!(row -> row.date >= Date(startdate), df)
-    !isnothing(enddate) && filter!(row -> row.date <= Date(enddate), df)
-    ts = df.date[1] : Day(1) : df.date[end]
-    @assert all(df.date .== ts )
+    df[!,datecol] += Day(shift)
+    !isnothing(startdate) && filter!(row -> row[datecol] >= Date(startdate), df)
+    !isnothing(enddate) && filter!(row -> row[datecol] <= Date(enddate), df)
+    ts = df[1,datecol] : Day(1) : df[end,datecol]
+    @assert all(df[!,datecol] .== ts )
     @assert !any( ismissing.(Array(df)) )
     @assert all( isfinite.(Array(df)) )
+    rename!(df, datecol=>:date)
     return df
 end
 
-country(df) = df.country
-
+country(df) = DataFrame(:date=>df.date, :country=>df.country)
 function get_iar_idx(num_tot, num_obs, start_idx, iar_step)
     iar_idx = zeros(Int64, num_tot)
     iar_idx[1:start_idx-1] .= 1
@@ -496,138 +487,206 @@ function holiday(dates)
     convert(Vector{Int64}, holidays)
 end
 
+function observables!(turing_data,
+    fname_cases  = normpath( homedir(), "data/Statens-Serum-Institut/dashboard/Regionalt_DB/08_bekraeftede_tilfaelde_pr_dag_pr_regions.csv" ),
+    fname_hospit = normpath( homedir(), "data/Statens-Serum-Institut/dashboard/Regionalt_DB/06_nye_indlaeggelser_pr_region_pr_dag.csv" ),
+    fname_deaths = normpath( homedir(), "data/Statens-Serum-Institut/dashboard/Regionalt_DB/07_antal_doede_pr_dag_pr_region.csv" )
+)
+
+    turing_data["cases"] = CSV.File( fname_cases ) |>
+        DataFrame |> process_ssi |> country
+
+
+    turing_data["hospit"] = CSV.File( fname_hospit ) |>
+        DataFrame |> process_ssi |> country
+
+    turing_data["deaths"] = CSV.File( fname_deaths ) |>
+        DataFrame |> process_ssi |> country
+
+    return nothing
+end
+
+function consistent!(data; epidemic_start = 30)
+    @unpack cases, hospit, deaths = data
+    s = data["startdate"] = startdate(deaths; epidemic_start)
+    e = enddate(deaths, cases, hospit)
+    data["deaths"] = limit(deaths, s, e)
+    data["hospit"] = limit(hospit, s, e)
+    data["cases"]  = limit(cases, s, e)
+    data["dates"]  = s:Day(1):e
+    @assert length(data["dates"]) == size(data["cases"],1) == size(data["hospit"],1) == size(data["deaths"],1)
+    return nothing
+end
+
+function startdate(df; epidemic_start = 30)
+    cumulative = cumsum(df[:,:country])
+    start_idx = findfirst(>=(10), cumulative)
+    return df.date[start_idx] - Day(epidemic_start)
+end
+
+function national_timeseries(dates, startdate, observations_end)
+    is = findfirst(==(startdate), dates)
+    ie = findfirst(==(observations_end), dates)
+    return dates[is:ie]
+end
+
+function totaldays(dates, startdates)
+    observations_end = last(dates)
+    national_dates = national_timeseries(dates, startdates, observations_end)
+    return length(national_dates)
+end
+
+function df2vec(df, startdate, observations_end)
+    vs = Vector{Vector{Int64}}()
+    is = findfirst(==(startdate), df.date)
+    ie = findfirst(==(observations_end), df.date)
+    v = vec(df[is:ie, :country])
+    return v
+end
+
+function turingformat!(data, observations_end = nothing)
+    @unpack dates, cases, hospit, deaths = data
+    e = data["observations_end"] = isnothing(observations_end) ? last(dates) : Date(observations_end)
+    s = data["startdate"]
+    data["num_tot"]       = totaldays(dates, s)
+    data["dates_turing"]  = national_timeseries(dates, s, e)
+    data["cases_turing"]  = df2vec(cases, s, e)
+    data["hospit_turing"] = df2vec(hospit, s, e)
+    data["deaths_turing"] = df2vec(deaths, s, e)
+    data["num_obs"]       = length(data["cases_turing"])
+    return nothing
+end
+
+function cases_start_date!(data, cases_start)
+    @unpack dates_turing, num_obs = data
+    if isnothing(cases_start)
+        data["num_case_obs"] = 0
+        data["cases_start_idx"] = nothing
+    else
+        data["cases_start_idx"] = i = findfirst(==(Date.(cases_start)), dates_turing)
+        data["num_case_obs"] = num_obs - i + 1
+    end
+    return nothing
+end
+
+function covariates!(data, predictors; covariates_kwargs...)
+    @unpack dates_turing, num_obs = data
+    isnothing(predictors) && return
+    covariates = readcovariates(; covariates_kwargs... )
+    covariates = leftjoin(DataFrame(:date=>dates_turing), covariates, on=:date)
+    sort!(covariates, :date)
+    covariates_start = findfirst(x->!ismissing(x), covariates[:,Not(:date)][:,1])
+    covariates = covariates[covariates_start:num_obs,:]
+    covariates = select_predictors(covariates, predictors) #num_obs+shift_covariates, num_tot
+    covariates = convert(Array{Float64,2}, covariates)
+    data["covariates"] = covariates
+    data["covariates_start"] = covariates_start
+    return nothing
+end
+
+function lockdown!(data, lockdown)
+    @unpack dates_turing = data
+    i = findfirst(==(Date(lockdown)), dates_turing)
+    data["lockdown_index"] = i
+    return nothing
+end
+
+function stepindex(n, stepsize)
+    index = Vector{Int64}(undef, n)
+    step = 1
+    for i in 1:n
+        index[i] = step
+        i % stepsize == 0 && ( step += 1 )
+    end
+    index
+end
+
+function randomwalk!(data, stepsize=1)
+    @unpack num_obs, lockdown_index = data
+    n = num_obs - lockdown_index
+    i = stepindex(n, stepsize)
+    data["num_rt_steps"] = n
+    data["rt_step_index"] = i
+    return nothing
+end
+
+
 function load_data(
-    observations_end=nothing,
-    predictors=nothing,
-    cases_start=nothing,
-    addhospital=false,
-    addseroprev=false,
-    addtests=false;
-    update=false,
-    iar_step = 7,
+    observations_end  = nothing,
+    predictors        = nothing,
+    cases_start       = nothing,
+    rw_step           = 1,
+    iar_step          = 1,
+    epidemic_start    = 30,
+    num_impute        = 6,
+    link              = KLogistic(3.),
+    invlink           = KLogit(3.),
+    lockdown          = "2020-03-18",
     covariates_kwargs = Dict(
-        :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
-        :shift => 0,
-        :startdate => nothing,
+        :fname => projectdir("data","smoothed_contact_rates.csv"),
+        :shift => -1,
+        :startdate => "2020-11-10",
         :enddate => nothing
     )
 )
 
-    cases = CSV.File(normpath( homedir(), "data/Statens-Serum-Institut/dashboard/Regionalt_DB/08_bekraeftede_tilfaelde_pr_dag_pr_regions.csv" ) ) |>
-        DataFrame |> process_ssi
+    data = Dict{String, Any}()
+    observables!(data)
+    consistent!(data; epidemic_start)
+    turingformat!(data, observations_end)
+    cases_start_date!(data, cases_start)
+    covariates!(data, predictors; covariates_kwargs...)
+    lockdown!(data, lockdown)
+    seroprev!(data)
+    # randomwalk!(data, rw_step)
 
-    deaths = CSV.File(normpath( homedir(), "data/Statens-Serum-Institut/dashboard/Regionalt_DB/07_antal_doede_pr_dag_pr_region.csv" ) ) |>
-        DataFrame |> process_ssi
+    # iar_idx = get_iar_idx(num_tot, num_obs, cases_start_idx, iar_step)
+    # num_iar_steps = length(unique(iar_idx))
 
-    hospit = CSV.File(normpath( homedir(), "data/Statens-Serum-Institut/dashboard/Regionalt_DB/06_nye_indlaeggelser_pr_region_pr_dag.csv" ) ) |>
-        DataFrame |> process_ssi
+    # dk = begin
+    #     update && run(`Rscript $(datadir())/COVID19.R`)
+    #     dk = load(datadir("COVID19", "DK.rds"))
+    #     limit(dk, s, e, false)
+    # end
 
-    # tests = CSV.File(normpath( homedir(), "data/Statens-Serum-Institut/dashboard/Regionalt_DB/06_nye_indlaeggelser_pr_region_pr_dag.csv" ) ) |>
-    #     DataFrame |> process_ssi
+    turing_data = (
+        num_impute                  = num_impute,
+        num_total_days              = data["num_tot"],
+        cases                       = data["cases_turing"],
+        deaths                      = data["deaths_turing"],
+        epidemic_start              = epidemic_start,
+        populations                 = population, #denmark statistics 2020 Q4
+        serial_interval             = serialinterval(15),#padzeros(serialinterval(30), 0, num_tot), #data_usa.turing_data.serial_intervals[1:50],
+        num_si                      = 15,
+        lockdown_indices            = data["lockdown_index"],
+        cases_start_indices         = data["cases_start_idx"],
+        hospits                     = data["hospit_turing"],
+        num_rt_steps                = data["num_rt_steps"],
+        rt_step_indices             = data["rt_step_index"],
+        num_observations            = data["num_obs"],
+        link                        = link,
+        invlink                     = invlink,
+        num_i2h                     = 40,
+        ϕ_i2h                       = 5.41,
+        seroprev_mean               = data["seroprev_mean"],
+        seroprev_std                = data["seroprev_std"],
+        seroprev_idx                = data["seroprev_idx"],
+    )
 
-    s      = startdate(deaths)
-    e      = enddate(deaths, hospit, cases)
-    dates  = collect( s : Day(1) : e )
-    deaths = limit(deaths, s, e) |> country
-    hospit = limit(hospit, s, e) |> country
-    cases  = limit(cases, s, e)  |> country
-    num_tot= length(dates)
-
-    dk = begin
-        update && run(`Rscript $(datadir())/COVID19.R`)
-        dk = load(datadir("COVID19", "DK.rds"))
-        limit(dk, s, e, false)
-    end
-
-    # survey = readsurveys(shift_covariates)
-    # surveyvars = filter(x->x!=="date", names(survey))
-    # dk = leftjoin(dk, survey, on = :date; validate=(true,true))
-    # Rt = CSV.File(
-    #     projectdir(
-    #         "data/Rt.csv")
-    # )  |> DataFrame
-    # push!(surveyvars, filter(x->x!=="date", names(Rt))...)
-    # dk = leftjoin(dk, Rt, on = :date; validate=(true,true))
-    # sort!(dk, :date)
-
-    num_obs = if isnothing(observations_end)
-        num_tot
-    else
-        findfirst(==(Date.(observations_end)), dates)
-    end
-
-    lockdown = findfirst(==(Date("2020-03-18")), dates)
-
-    num_case_obs, cases_start_idx = if isnothing(cases_start)
-        0, nothing
-    else
-        cases_start_idx = findfirst(==(Date.(cases_start)), dates)
-        num_obs - cases_start_idx + 1, cases_start_idx
-    end
-
-    iar_idx = get_iar_idx(num_tot, num_obs, cases_start_idx, iar_step)
-    num_iar_steps = length(unique(iar_idx))
-
-
-    turing_data = OrderedDict(
-        :num_impute                  => 6,
-        :num_total_days              => num_tot,
-        :cases                       => cases[1:num_obs], #padmissing(cases[mask], num_tot),
-        :deaths                      => deaths[1:num_obs], #padmissing(deaths[mask], num_tot),
-        :π                           => inf2death(90),#padzeros(inf2death(90), 0, num_tot),#[1:100], #length = 100
-        :π2                          => inf2case(40),#padzeros(inf2case(30), 0, num_tot),#[1:30], #WARNING US-NY DATA
-        :epidemic_start              => 31,
-        :population                  => dk.population[1],
-        :serial_intervals            => serialinterval(15),#padzeros(serialinterval(30), 0, num_tot), #data_usa.turing_data.serial_intervals[1:50],
-        :num_iar_steps               => num_iar_steps,
-        :iar_idx                     => iar_idx,
-        :lockdown                    => lockdown,
-        :num_case_obs                => num_case_obs,
-        :weekday                     => dayofweek.(dates),
-        :holiday                     => holiday(dates)
-        )
-
-    if !isnothing(predictors)
-        covariates = National.readcovariates(; covariates_kwargs... )
-        covariates = leftjoin(DataFrame(:date=>dates), covariates, on=:date)
-        sort!(covariates, :date)
-        covariates_start = findfirst(x->!ismissing(x), covariates[:,end]) # NOTE: assiming all covariates start at the same date
-        covariates = covariates[covariates_start:num_obs,:]
-
-        covariates = select_predictors(covariates, predictors) #num_obs+shift_covariates, num_tot
-        covariates = convert(Array{Float64,2}, covariates)
-        # preds = select_predictors(dk, predictors, num_obs+shift_covariates, num_tot, surveyvars)
-        # preds = convert(Array{Float64,2}, preds[covariates_start:end,:] )
-        turing_data[:covariates] = covariates
-        turing_data[:covariates_start] = covariates_start
-    end
-
-    if addhospital
-        turing_data[:πh] = inf2hosp(50, 1)#padzeros(inf2hosp(50, 1), 0,  num_tot) #length 50
-        turing_data[:hospit] = hospit[1:num_obs]
-    end
-
-    seroprev, turing_seroprev = readseroprev(dates[1:num_obs])
-    if addseroprev
-        #turing_data[:πs] = padzeros(inf2serocon(50, 1), 0,  num_tot)
-        turing_data[:seroprev_mean] = turing_seroprev.mean * dk.population[1]
-        turing_data[:seroprev_std]  = turing_seroprev.std * dk.population[1]
-        turing_data[:seroprev_idx]  = turing_seroprev.idx
-        turing_data[:πs]            = seropos(num_tot)
-    end
-
-
-    turing_data = (;turing_data...)
-    Data(
+    Data1(
         turing_data,
-        cases,
-        deaths,
-        hospit,
-        num_obs, #num_observations
-        num_tot,
-        dates,
-        dk.population,
+        data["cases"],
+        data["deaths"],
+        data["hospit"],
+        data["num_obs"], #num_observations
+        data["num_tot"],
+        data["dates"],
+        population,
         predictors,
-        seroprev,
+        data["seroprev"],
+        lockdown,
+        observations_end,
+        cases_start,
+        data["startdate"]
     )
 end

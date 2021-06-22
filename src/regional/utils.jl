@@ -1,29 +1,3 @@
-using DistributionsAD
-
-struct RandomWalk{Tn, Ts, Tx} <: ContinuousMultivariateDistribution
-  n::Tn
-  s::Ts
-  x0::Tx
-end
-
-Distributions.rand(rng::AbstractRNG, d::RandomWalk{Tn, Ts, Tx}) where {Tn, Ts, Tx} = begin
-  x = Vector{Tx}(undef, d.n)
-  x[1] = d.x0
-  for i in 2:d.n
-    x[i] = x[i-1] + rand(Normal(0, d.s))
-  end
-  return x
-end
-
-Distributions.logpdf(d::RandomWalk{Tn, Ts, Tx}, x::AbstractVector{T}) where {Tn, Ts, Tx, T} =
-    logpdf( MvNormal( d.n-1, d.s ), diff(x) )# + logpdf( Normal( zero(Ts), x[1] ) )
-
-Bijectors.bijector(d::RandomWalk) = Identity{1}()
-
-Bijectors.bijector( ::DistributionsAD.VectorOfMultivariate{Continuous, RandomWalk{Tn, Ts, Tx}, Vector{RandomWalk{Tn, Ts, Tx}}} ) where {Tn, Ts, Tx} = Identity{2}()
-
-
-Base.length(d::RandomWalk) = d.n
 # ============================================================================
 # random walk model
 function random_walks!(Rts, θ, predict, latent_Rts, R0s)

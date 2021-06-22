@@ -225,7 +225,7 @@ function serialinterval(nbins = 30)
     # return p / sum(p)
     ## Brauer et al. Science (2020)
     p = diff(cdf.(GammaMeanStd(5.06, 2.11), r))
-    return p / sum(p)
+    return p# / sum(p)
 end
 
 # ============================================================================
@@ -430,18 +430,16 @@ end
 
 function covariates!(data, predictors; kwargs...)
     isnothing(predictors) && return
-    # covariates = readcovariates(; kwargs... )
-    # covariates = leftjoin(DataFrame(:date=>dates), covariates, on=:date)
+    # @unpack dates_turing, num_obs = data
+    # covariates = readcovariates(; covariates_kwargs... )
+    # covariates = leftjoin(DataFrame(:date=>dates_turing), covariates, on=:date)
     # sort!(covariates, :date)
-    # covariates_start = findfirst(x->!ismissing(x), covariates[:,end]) # NOTE: assiming all covariates start at the same date
+    # covariates_start = findfirst(x->!ismissing(x), covariates[:,Not(:date)][:,1])
     # covariates = covariates[covariates_start:num_obs,:]
-    #
     # covariates = select_predictors(covariates, predictors) #num_obs+shift_covariates, num_tot
     # covariates = convert(Array{Float64,2}, covariates)
-    # # preds = select_predictors(dk, predictors, num_obs+shift_covariates, num_tot, surveyvars)
-    # # preds = convert(Array{Float64,2}, preds[covariates_start:end,:] )
-    # turing_data[:covariates] = covariates
-    # turing_data[:covariates_start] = covariates_start
+    # data["covariates"] = covariates
+    # data["covariates_start"] = covariates_start
     return nothing
 end
 

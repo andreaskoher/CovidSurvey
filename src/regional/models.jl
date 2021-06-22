@@ -1,3 +1,4 @@
+using ..CovidSurvey: RandomWalk
 ## ============================================================
 @model function model_hospit(
     θ,     # [Bool] if `false`, will only compute what's needed to `observe` but not more

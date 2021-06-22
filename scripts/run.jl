@@ -116,8 +116,8 @@ data = National.load_data(
     , covariates_kwargs = Dict(
         :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
         :shift => -1,
-        :startdate => "2020-11-10",
-        :enddate => "2021-01-13"
+        :startdate => "2020-11-10", # >= 1000 cases / day 
+        # :enddate => "2021-01-13" # <= 1000 cases / day
     )
 )
 turing_data = data.turing_data;
