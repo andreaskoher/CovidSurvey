@@ -23,7 +23,7 @@ using ..CovidSurvey: RandomWalk
 	random_walks!(Rts, θ, predict, latent_Rts, R0s)
 
 	############ 3.) infection dynamics
-	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
+	τ  ~ Exponential(1 / 0.02) # `Exponential` has inverse parameterization of the one in Stan
 	T  = typeof(τ)
 	ys ~ filldist(truncated(Exponential(τ),T(0),T(1000)), num_regions)
 
@@ -35,7 +35,7 @@ using ..CovidSurvey: RandomWalk
 	# infections!(newly_infecteds, cumulative_infecteds, effective_Rts, θ, τ, ys, Rts)
 	########### 4.) derive observables
     μ_i2h ~ truncated(Normal(12., 1.), 9, 16)
-	ihr   ~ truncated(Normal(1.8/100,0.5/100),1/100,5/100)
+	ihr   ~ truncated(Normal(1.8/100,0.5/100),.1/100,5/100)
 
 	expected_daily_hospits = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
 

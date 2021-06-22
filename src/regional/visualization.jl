@@ -2,8 +2,6 @@ using OrderedCollections
 
 abstract type PlottingRecipe end
 
-Plots.plot(pr::PlottingRecipe, args...) = plot!(plot(), pr, args...)
-
 # ============================================================================
 # hospitalizations for all regions
 
@@ -78,6 +76,7 @@ function Plots.plot!(p::Plots.Plot, hospit::SingleHospitPlottingRecipe)
     plot_confidence_timeseries!(p, e.dates, e.values; label = "expected hospitalizations") #Dict(hover=>strdates)
 end
 
+Plots.plot(pr::SingleHospitPlottingRecipe) = plot!(plot(), pr)
 # ============================================================================
 # reproduction number for a single region
 
@@ -107,6 +106,7 @@ function Plots.plot!(p::Plots.Plot, rt::SingleRtPlottingRecipe)
     plot_confidence_timeseries!(p, e.dates, e.values; label = "reproduction number") #Dict(hover=>strdates)
 end
 
+Plots.plot(pr::SingleRtPlottingRecipe) = plot!(plot(), pr)
 # ============================================================================
 # reproduction number for all regions
 

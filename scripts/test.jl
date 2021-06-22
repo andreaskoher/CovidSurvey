@@ -53,12 +53,11 @@ fname = savename("chains", ps, "")
 Random.seed!(ps.seed);
 @info ps
 
-data = National.load_data(;
+data = Regional.load_data(;
     observations_end  = ps.observ,
     predictors        = ps.preds |> CovidSurvey.parse_predictors,
     cases_start       = ps.cases,
     rw_step           = 1,
-    iar_step          = 1,
     epidemic_start    = 30,
     num_impute        = 6,
     link              = KLogistic(3.),
@@ -101,11 +100,11 @@ turing_data = data.turing_data;
 #----------------------------------------------------------------------------
 # sample model
 model = name2model[ps.model]
+model = Regional.model_hospit
 m = model(turing_data, false)
 Turing.emptyrdcache()
 m()
 @time chain = sample(m, NUTS(ps.warmup, 0.95), ps.steps + ps.warmup; progress=true)
-
 
 @time chain = sample(m, NUTS(ps.warmup, 0.95), MCMCThreads(), ps.steps + ps.warmup, 3)
 # using MCMCChains
@@ -151,6 +150,7 @@ safesave(fname_diagnostics, diagnostics)
 m_pred = model(turing_data, true)
 gq = Turing.generated_quantities(m_pred, chain)
 generated_posterior = vectup2tupvec( reshape(gq, length(gq)) );
+generated_posterior = Regional.posterior(model, turing_data, chain)
 #---------------------------------------------------------------------------
 # plot results
 plotlyjs()

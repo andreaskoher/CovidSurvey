@@ -103,7 +103,7 @@ function OverviewPlottingRecipe(data::National.Data, generated_posterior)
     OverviewPlottingRecipe(recipes, titles)
 end
 
-function Plots.plot(r::OverviewPlottingRecipe)
+function Plots.plot!(p::Plots.Plot, r::OverviewPlottingRecipe)
     plots  = Vector{Plots.Plot}()
     nplots = length(r.recipes)
     for (recipe, title) in zip(r.recipes, r.titles)
@@ -111,12 +111,12 @@ function Plots.plot(r::OverviewPlottingRecipe)
         plot!(p, recipe)
         push!(plots, p)
     end
-    plot(plots..., layout=(nplots,1), size=(1000, nplots*250), sharex=true, link=:x)
+    plot!(p, plots..., layout=(nplots,1), size=(1000, nplots*250), sharex=true, link=:x)
 end
 
-Plots.plot(data::National.Data, generated_posterior) =
+Plots.plot!(p::Plots.Plot, data::National.Data, generated_posterior) =
     plot( OverviewPlottingRecipe(data, generated_posterior) )
-Plots.plot(pr::PlottingRecipe, args...) = plot!(plot(), pr, args...)
+Plots.plot(data::National.Data, generated_posterior) = plot!(plot(), data, generated_posterior)
 
 
 

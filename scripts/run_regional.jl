@@ -134,10 +134,10 @@ end
 #-----------------------------------------------------------------------------
 # save chain
 chain = let
-    chain[ps.warmup+1:end,:,:]
+    chain = chain[ps.warmup+1:end,:,:]
+    chain = chain[1:10:end,:,:]
     fname = normpath( fdir, savename(ps.prefix*"CHAIN", ps, "jls") )
     safesave( fname, chain )
-    chain[1:10:end,:,:]
 end
 #-----------------------------------------------------------------------------
 @info "make predictions"
