@@ -1,6 +1,6 @@
 const population = 5_837_213
 
-struct Data1
+struct Data
     turing_data
     cases
     deaths
@@ -395,7 +395,7 @@ function seroprev!(data; later_dataset = true)
     df[!,:std] = [max( abs.(df.country[i] .- df.CI[i])... ) / 1.96 for i in 1:length(df.CI)]
     data["seroprev_std"]  = df.std
     data["seroprev_mean"] = df.country
-    data["seroprev_idx"]  = [findfirst(==(d), dates) for d in df.date]
+    data["seroprev_idx"]  = [findfirst(==(d), dates_turing) for d in df.date]
     data["seroprev"]      = df
     return nothing
 end
@@ -452,7 +452,7 @@ end
 #     s = innerjoin(s1, s2, on=:date)
 #     s[3:end,:] # skip first for data quality
 # end
-function readcovariates(; fname=nothing, shift=0, startdate=nothing, enddate=nothing, datecol=:dates)
+function readcovariates(; fname=nothing, shift=0, startdate=nothing, enddate=nothing, datecol=:date)
     isnothing(fname) && (@error "please give a file name to covariates_kwargs")
     df = CSV.File(fname)|>DataFrame
     df[!,datecol] += Day(shift)
@@ -611,7 +611,7 @@ function randomwalk!(data, stepsize=1)
 end
 
 
-function load_data(
+function load_data(;
     observations_end  = nothing,
     predictors        = nothing,
     cases_start       = nothing,
@@ -638,7 +638,7 @@ function load_data(
     covariates!(data, predictors; covariates_kwargs...)
     lockdown!(data, lockdown)
     seroprev!(data)
-    # randomwalk!(data, rw_step)
+    randomwalk!(data, rw_step)
 
     # iar_idx = get_iar_idx(num_tot, num_obs, cases_start_idx, iar_step)
     # num_iar_steps = length(unique(iar_idx))
@@ -655,12 +655,12 @@ function load_data(
         cases                       = data["cases_turing"],
         deaths                      = data["deaths_turing"],
         epidemic_start              = epidemic_start,
-        populations                 = population, #denmark statistics 2020 Q4
+        population                  = population, #denmark statistics 2020 Q4
         serial_interval             = serialinterval(15),#padzeros(serialinterval(30), 0, num_tot), #data_usa.turing_data.serial_intervals[1:50],
         num_si                      = 15,
-        lockdown_indices            = data["lockdown_index"],
-        cases_start_indices         = data["cases_start_idx"],
-        hospits                     = data["hospit_turing"],
+        lockdown_index              = data["lockdown_index"],
+        cases_start_index           = data["cases_start_idx"],
+        hospit                      = data["hospit_turing"],
         num_rt_steps                = data["num_rt_steps"],
         rt_step_indices             = data["rt_step_index"],
         num_observations            = data["num_obs"],
@@ -673,7 +673,7 @@ function load_data(
         seroprev_idx                = data["seroprev_idx"],
     )
 
-    Data1(
+    Data(
         turing_data,
         data["cases"],
         data["deaths"],

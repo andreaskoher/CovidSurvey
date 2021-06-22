@@ -46,7 +46,7 @@ using ..CovidSurvey: RandomWalk
 	ϕ_h   ~ truncated(Normal(50, 10), 20, Inf)
 
 	ℓ  = zero(V)
-	ℓ += observe_hospitalizations(ℓ, θ, expected_daily_hospits, ϕ_h)
+	ℓ += observe_hospitalizations(θ, expected_daily_hospits, ϕ_h)
 
 	Turing.@addlogprob! ℓ
 

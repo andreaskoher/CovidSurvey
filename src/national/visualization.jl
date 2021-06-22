@@ -1,4 +1,139 @@
+using OrderedCollections
 
+abstract type PlottingRecipe end
+
+Plots.plot(pr::PlottingRecipe, args...) = plot!(plot(), pr, args...)
+
+# =============================================================================
+# hospitalizations
+
+struct HospitPlottingRecipe{Tsd, Ted, To, Te} <: PlottingRecipe
+    startdate ::Tsd
+    enddate   ::Ted
+    observed  ::To
+    expected  ::Te
+end
+
+function HospitPlottingRecipe(data::National.Data, generated_posterior)
+    expected = let
+        dates  = data.dates
+        values = generated_posterior.expected_daily_hospit
+        (; dates, values )
+    end
+    observed = let
+        dates  = data.hospit.date
+        values = data.hospit.country
+        (; dates, values )
+    end
+    startdate = Date(data.startdates)
+    enddate   = Date(data.observations_end)
+    HospitPlottingRecipe( startdate, enddate, observed, expected)
+end
+
+function Plots.plot!(p::Plots.Plot, hospit::HospitPlottingRecipe)
+    o  = hospit.observed
+    e  = hospit.expected
+    ed = hospit.enddate
+    sd = hospit.startdate
+
+    plot!(p, o.dates, o.values, α=0.5, lc=:match, lab="observed hospitalizations", c=:midnightblue, lw=4, ylab="cases")
+    vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+    vline!(p, [sd], lab="start observations", lw=2, lc=:black, hover="$sd", ls=:dash)
+    plot_confidence_timeseries!(p, e.dates, e.values; label = "expected hospitalizations") #Dict(hover=>strdates)
+end
+
+# ============================================================================
+# reproduction number
+
+struct RtPlottingRecipe{Tlo, Ted, Te} <: National.PlottingRecipe
+    lockdown  ::Tlo
+    enddates  ::Ted
+    expected  ::Te
+end
+
+function RtPlottingRecipe(data::National.Data, generated_posterior)
+    dates      = data.dates
+    values     = generated_posterior.Rt
+    expected   = (; dates, values )
+    lockdown   = Date(data.lockdown)
+    enddates   = Date(data.observations_end)
+    RtPlottingRecipe( lockdown, enddates, expected)
+end
+
+function Plots.plot!(p::Plots.Plot, rt::RtPlottingRecipe)
+    e  = rt.expected
+    ed = rt.enddates
+    lo = rt.lockdown
+
+    vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+    vline!(p, [lo], lab="lockdown", lw=2, lc=:black, hover="$lo", ls=:dash)
+    plot_confidence_timeseries!(p, e.dates, e.values; label = "reproduction number") #Dict(hover=>strdates)
+end
+
+# ============================================================================
+# region plot
+
+struct OverviewPlottingRecipe{Tr,Tt} <: National.PlottingRecipe
+    recipes::Tr
+    titles ::Tt
+end
+
+posterior2recipe = OrderedDict(
+    :expected_daily_hospit => National.HospitPlottingRecipe,
+    :Rt                    => National.RtPlottingRecipe
+)
+
+posterior2title = OrderedDict(
+    :expected_daily_hospit => "daily hospitalizations",
+    :Rt                    => "effective reproduction number"
+)
+
+function OverviewPlottingRecipe(data::National.Data, generated_posterior)
+    ks = keys(generated_posterior)
+    recipes = Vector{National.PlottingRecipe}()
+    titles  = Vector{String}()
+    for (k,recipe) in posterior2recipe
+        if k in ks
+            r = recipe(data, generated_posterior)
+            title  = posterior2title[k]
+            push!(recipes, r)
+            push!(titles, title)
+        end
+    end
+    OverviewPlottingRecipe(recipes, titles)
+end
+
+function Plots.plot(r::OverviewPlottingRecipe)
+    plots  = Vector{Plots.Plot}()
+    nplots = length(r.recipes)
+    for (recipe, title) in zip(r.recipes, r.titles)
+        p = plot(; xaxis = true, legend = :outertopright, title)
+        plot!(p, recipe)
+        push!(plots, p)
+    end
+    plot(plots..., layout=(nplots,1), size=(1000, nplots*250), sharex=true, link=:x)
+end
+
+Plots.plot(data::National.Data, generated_posterior) =
+    plot( OverviewPlottingRecipe(data, generated_posterior) )
+Plots.plot(pr::PlottingRecipe, args...) = plot!(plot(), pr, args...)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## ============================================================================
+# out dated
 function plot_results(data, expected_daily_cases, expected_daily_deaths, expected_daily_hospit, Rt, cumulative_cases, iar)
     l = @layout [a; b; c; d; e; f]
 

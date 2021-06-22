@@ -596,10 +596,10 @@ end
 
 	newly_infected       = TV(undef, num_time_steps)
 	cumulative_infected  = TV(undef, num_time_steps)
-	# effective_Rt         = TV(undef, num_time_steps)
+	effective_Rt         = TV(undef, num_time_steps)
 
-	infections!(newly_infected, cumulative_infected, θ, τ, y, Rt)
-	# infections!(newly_infected, cumulative_infected, effective_Rt, θ, τ, ys, Rts)
+	# infections!(newly_infected, cumulative_infected, θ, τ, y, Rt)
+	infections!(newly_infected, cumulative_infected, effective_Rt, θ, τ, y, Rt)
 	########### 4.) derive observables
     μ_i2h ~ truncated(Normal(12., 1.), 9, 16)
 	ihr   ~ truncated(Normal(1.8/100,0.5/100),1/100,5/100)
@@ -613,7 +613,7 @@ end
 	ϕ_h   ~ truncated(Normal(50, 10), 20, Inf)
 
 	ℓ  = zero(V)
-	ℓ += observe_hospitalizations(ℓ, θ, expected_daily_hospit, ϕ_h)
+	ℓ += observe_hospitalizations(θ, expected_daily_hospit, ϕ_h)
 
 	Turing.@addlogprob! ℓ
 
@@ -621,7 +621,7 @@ end
 		newly_infected = newly_infected,
 		expected_daily_hospit = expected_daily_hospit,
 		Rt = Rt,
-		# effective_Rt = effective_Rts
+		effective_Rt = effective_Rt
 	)
 end
 

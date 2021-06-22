@@ -1,5 +1,5 @@
 # ==============================================================================
-using DistributionsAD
+# using DistributionsAD
 using Random: AbstractRNG
 import Bijectors
 
@@ -33,9 +33,9 @@ end
 
 Bijectors.bijector(d::RandomWalk) = Bijectors.Identity{1}()
 
-Bijectors.bijector(
-    ::DistributionsAD.VectorOfMultivariate{Continuous, RandomWalk{Tn, Ts, Tx}, Vector{RandomWalk{Tn, Ts, Tx}}}
-) where {Tn, Ts, Tx} = Bijectors.Identity{2}()
+# Bijectors.bijector(
+#     ::DistributionsAD.VectorOfMultivariate{Continuous, RandomWalk{Tn, Ts, Tx}, Vector{RandomWalk{Tn, Ts, Tx}}}
+# ) where {Tn, Ts, Tx} = Bijectors.Identity{2}()
 
 
 Base.length(d::RandomWalk) = d.n

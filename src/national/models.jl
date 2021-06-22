@@ -5,10 +5,10 @@ using ..CovidSurvey: RandomWalk
 function random_walks!(Rt, θ, predict, latent_Rt, R0)
 	@unpack rt_step_indices, lockdown_index, num_observations, link = θ
 
-	Rt[1:lockdown] .= R0
-	Rt[lockdown+1:num_obs] = link.(latent_Rt[rt_step_index])
+	Rt[1:lockdown_index] .= R0
+	Rt[lockdown_index+1:num_observations] = link.(latent_Rt[rt_step_indices])
 	if predict
-		Rt[num_obs+1:end] .= Rt[num_obs]
+		Rt[num_observations+1:end] .= Rt[num_observations]
 	end
 	return nothing
 end
@@ -77,9 +77,10 @@ function hospitalizations!(expected_daily_hospit, θ, μ_i2h, ihr, newly_infecte
 	return nothing
 end
 
-function observe_hospitalizations(ℓ, θ, expected_daily_hospit, ϕ_h)
-	@unpack num_regions, population, num_observations, hospit, epidemic_start = θ
+function observe_hospitalizations(θ, expected_daily_hospit, ϕ_h)
+	@unpack population, num_observations, hospit, epidemic_start = θ
 
+	ℓ     = 0.
 	T     = typeof(ℓ)
 	ts_h  = epidemic_start:num_observations
 	μs_h  = expected_daily_hospit[ts_h]
