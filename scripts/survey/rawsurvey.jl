@@ -68,6 +68,8 @@ contactrates = load(projectdir("data","inferred_contact_rates.csv")) |> DataFram
 
 slowtrends = decompose(contactrates; fdir=projectdir("figures/"))
 save(projectdir("data","smoothed_contact_rates.csv"), slowtrends)
+bson("contacts_decomposition=$(results.problemtype)", Dict(:slowtrends => slowtrends))
+BSON.load("survey_inference_results_method=ZINegBinomialProblem.bson")
 ##
 p = plot_comparison_with_SSI(contactrates);
 firefox(p; fname="compare_SSI_with_contactrates.html");
