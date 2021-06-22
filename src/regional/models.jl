@@ -14,7 +14,7 @@
 
 	R0s        ~ filldist(truncated(Normal(3., 1.), 1., 5.), num_regions)
 	R1s        ~ filldist(truncated(Normal(.8, .1), .5, 1.1), num_regions)
-	σ_rt       ~ truncated(Normal(0.05, .03), 0, .3)
+	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
 	latent_Rts ~ arraydist( RandomWalk.(num_rt_steps, Ref(σ_rt), invlink.(R1s)) )
 
 	Rts = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
@@ -33,8 +33,8 @@
 	infections!(newly_infecteds, cumulative_infecteds, θ, τ, ys, Rts)
 	# infections!(newly_infecteds, cumulative_infecteds, effective_Rts, θ, τ, ys, Rts)
 	########### 4.) derive observables
-    μ_i2h ~ truncated(Normal(12., 3.), 9, 16)
-	ihr   ~ truncated(Normal(1/100,1/100),.1/100,5/100)
+    μ_i2h ~ truncated(Normal(12., 1.), 9, 16)
+	ihr   ~ truncated(Normal(1.8/100,0.5/100),1/100,5/100)
 
 	expected_daily_hospits = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
 
@@ -42,7 +42,7 @@
 
 	########### 4.) compare model to observations
 	## 4.1) observe hospitalizations
-	ϕ_h   ~ truncated(Normal(25, 10), 0, Inf)
+	ϕ_h   ~ truncated(Normal(50, 10), 20, Inf)
 
 	ℓ  = zero(V)
 	ℓ += observe_hospitalizations(ℓ, θ, expected_daily_hospits, ϕ_h)
