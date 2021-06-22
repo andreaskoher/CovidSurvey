@@ -9,6 +9,6 @@
 *.dat
 *.txt
 *.bson
-/out/
-/figures/
 *.svg
+*.png
+*.pdf
