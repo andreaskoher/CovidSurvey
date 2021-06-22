@@ -129,9 +129,10 @@ function hospitalizations!(expected_daily_hospits, θ, μ_i2h, ihr, newly_infect
 	return nothing
 end
 
-function observe_hospitalizations(ℓ, θ, expected_daily_hospits, ϕ_h)
+function observe_hospitalizations(θ, expected_daily_hospits, ϕ_h)
 	@unpack num_regions, populations, num_observations, hospits, epidemic_start = θ
 
+	ℓ = 0.
 	T = typeof(ℓ)
 	for m in 1:num_regions
 		population            = populations[m]
