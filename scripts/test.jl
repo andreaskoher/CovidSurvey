@@ -15,11 +15,12 @@ using Base.Threads
 using StatsFuns
 using ReverseDiff
 using Memoization
-setadbackend(:reversediff)
 Turing.setrdcache(true)
+setadbackend(:reversediff)
+## ============================================================================
 nthreads()
 name2model = Dict(
-    # "v1" => National.model_v1,
+    "v3" => National.model_v3,
     "v2"        => National.model_v2,
     "gp"        => National.model_gp,
     # "contacts" => National.model_contacts,
@@ -32,7 +33,8 @@ name2model = Dict(
     "contacts-shifted" => National.model_contacts_shifted,
     "deaths" => National.model_deaths,
     "cases" => National.model_cases,
-    "hospit" => National.model_hospit
+    "hospit" => National.model_hospit,
+    "parametric-cases" => National.model_parametric_cases
 )
 #-----------------------------------------------------------------------------
 # load data
@@ -40,10 +42,10 @@ ps = (
     warmup = 10,
     steps  = 20,
     seed   = 20000,
-    observ = "2021-01-01",#"2021-02-06",#"2021-03-25"
+    observ = "2021-01-13",#"2021-02-06",#"2021-03-25"
     cases  = "2020-06-01",
-    model  = "v2",
-    preds = nothing,
+    model  = "v3",#"parametric-cases",
+    preds = nothing,#"CF,CC,CR,CS",
     hospit = true,
     sero = true,
 )
@@ -57,16 +59,47 @@ data = National.load_data(
     ps.hospit,
     ps.sero;
     update=false,
-    fname_covariates = projectdir("data/Rt_SSI.csv"),#normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
     iar_step = 7,
-    shift_covariates = 2 #DEBUG
+    covariates_kwargs = Dict(
+        :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
+        :shift => -1,
+        :startdate => "2020-11-10",
+        :enddate => "2021-01-13"
+    )
 )
 turing_data = data.turing_data;
+
+# num_obs = turing_data.cases|>length
+# lockdown = turing_data.lockdown
+# covariates_start = turing_data.covariates_start
+# num_Rt_steps   = covariates_start-lockdown-1
+# num_obs
+# lockdown + num_Rt_steps + size(covariates, 1)
+# covariates = turing_data.covariates
+# size(covariates, 1)
+#
+# length(turing_data.cases)
+#
+# fname = normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" )
+# survey = load( fname )|>DataFrame
+# National.readcovariates(; covariates_kwargs...
+# )
+
+# findfirst(==(Date("2021-01-01")),data.dates) - findfirst(==(Date("2020-05-15")),data.dates) + 1
+# findfirst(==(Date("2021-01-01")),data.dates)
+# size(survey, 1)
+#
+#
+# data.dates
+#
+# covariates[140,1]
+# size(turing_data.covariates,1) - turing_data.covariates_start
 #----------------------------------------------------------------------------
 # sample model
 model = name2model[ps.model]
 m = model(turing_data..., false; link=KLogistic(3.), invlink=KLogit(3.))
 Turing.emptyrdcache()
+m()
 @time chain = sample(m, NUTS(ps.warmup, 0.95), ps.steps + ps.warmup; progress=true)
 @time chain = sample(m, NUTS(ps.warmup, 0.95), MCMCThreads(), ps.steps + ps.warmup, 3)
 # using MCMCChains
@@ -109,7 +142,7 @@ safesave(fname_diagnostics, diagnostics)
 # data = ImperialUSAcases.Data(Dict(),turing_data,Dict("DK"=>dk.date),turing_data.deaths,"DK")
 # m = model(turing_data..., false)
 # chain = sample(m, Prior(), 2000)
-m_pred = model(turing_data..., true)
+m_pred = model(turing_data..., true; link=KLogistic(3.), invlink=KLogit(3.))
 gq = Turing.generated_quantities(m_pred, chain)
 generated_posterior = vectup2tupvec( reshape(gq, length(gq)) );
 #---------------------------------------------------------------------------
