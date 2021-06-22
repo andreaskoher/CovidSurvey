@@ -114,10 +114,12 @@ data = National.load_data(
     , parsed_args["seroprevalence"]
     , iar_step = 1
     , covariates_kwargs = Dict(
-        :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
+        :fname => projectdir("data", "inferred_contact_rates.csv"),
+        # :fname => projectdir("data", "smoothed_contact_rates.csv"), #normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
+        # :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
         :shift => -1,
         :startdate => "2020-11-10",
-        :enddate => "2021-01-13"
+        # :enddate => "2021-01-13"
     )
 )
 turing_data = data.turing_data;
