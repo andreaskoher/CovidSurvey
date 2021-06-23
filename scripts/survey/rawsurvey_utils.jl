@@ -54,7 +54,7 @@ function contact_histograms(data; day=nothing, kwargs...)
         p = histogram( df[!, c]; label=nothing, xticks=:native, yticks=:native, title="$c", kwargs...)
         push!(ps, p)
     end
-    plot(ps..., layout=(2,2))
+    plot(ps..., layout=(2,2), size=(800, 500))
 end
 
 ## =============================================================================
@@ -303,6 +303,12 @@ struct SurveyInferenceResults{P,N,D,T,R,M,O,A}
     dates::A
 end
 
+function DrWatson.save(file, results::SurveyInferenceResults)
+    @unpack θ, μ, data, names, dates, problemtype, problem = results
+    r = SurveyInferenceResults(problemtype, names, data, θ, problem, μ, nothing, dates)
+    bson( file, Dict(:results => r) )
+end
+
 function Optim.optimize(survey::SurveyInferenceProblem, args...; kwargs...)
     @unpack date = survey.data
     dates = first(date) : Day(1) : last(date)
@@ -342,13 +348,14 @@ function CovidSurvey.plot_confidence_timeseries(results::SurveyInferenceResults)
         label_fake = "fake data from posterior ($n)"
 
         df = DataFrame(
-            label_data=>y,
-            label_fake=>problem[i].y,
+            label_fake=>y,
+            label_data=>problem[i].y,
             "date"=>data.date
         )
 
-        p = CovidSurvey.plot_confidence_timeseries(df; cols=[label_data, label_data])
+        p = CovidSurvey.plot_confidence_timeseries(df; cols=[label_fake, label_data])
         firefox(p; fname="inference_result_$n.html")
+        break
     end
 end
 
@@ -393,8 +400,8 @@ function plot_survey_histograms(
             y = y[mask]
         end
 
-        p = histogram( ŷ, bins=0:20, label="posterior", fc=:green, lw=0)
-        histogram!(y, bins=0:20, label="data", fα=0., lc=:blue, lw=2)
+        p = histogram( ŷ, bins=0:20, label="posterior", fc=:gray, lw=0, yticks=:native, leg=:topright)
+        histogram!(y, bins=0:20, label="data", fα=0., lc=:blue, lw=2, yticks=:native)
         push!(ps, p)
     end
     p = plot(ps..., layout=(2,2), size=(800, 500))

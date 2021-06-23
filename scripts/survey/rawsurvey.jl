@@ -19,6 +19,7 @@ using TransformVariables, LogDensityProblems
 using Optim
 using ReverseDiff
 using BSON
+using TimeSeriesDecompositions
 plotlyjs()
 
 # using DataFramesMeta
@@ -30,11 +31,17 @@ include( projectdir("scripts/survey/rawsurvey_utils.jl") )
 contacts = readcontacts( "/home/and/data/covidsurvey/rawcontacts.csv" )
 ## =============================================================================
 # remove outliers
+# pgfplotsx()
+# scalefontsizes(1/1.5)
 contacts = filteroutliers(contacts)
-contact_histograms(contacts; day=nothing, bins=0:10)
+p = contact_histograms(contacts; day=100, bins=0:10, fc=:gray)
+saveto = projectdir("figures","survey_histogram.png")
+savefig(p, saveto)
 ## =============================================================================
 # plot daily aggregated time series
-plot_confidence_timeseries(contacts)
+# plotlyjs()
+p = plot_confidence_timeseries(contacts);
+
 ## =============================================================================
 # zero contacts
 zerocontacts = countzeros(contacts)
@@ -54,21 +61,26 @@ results = optimize(surveyproblem, LBFGS(),
 )
 
 contactrates = DataFrame(results)
+# save(projectdir("scripts/survey/","survey_inference_results_method=$(results.problemtype).bson"), results)
 ## save and plots results
-# bson("survey_inference_results_method=$(results.problemtype)", Dict(:results => results))
-# BSON.load("survey_inference_results_method=ZINegBinomialProblem.bson")
+using FillArrays
+BSON.@load projectdir("scripts/survey/survey_inference_results_method=ZINegBinomialProblem.bson") results
 # save(projectdir("data","inferred_contact_rates.csv"), contactsrates)
 plot_confidence_timeseries(results)
 plot_generated_quantities(results, compare_old=true)
-plot_survey_histograms(results, day=nothing)
-## =============================================================================
-using TimeSeriesDecompositions
-
+pgfplotsx()
+p = plot_survey_histograms(results, day=nothing)
+savefig(p, projectdir("figures/histogram_survey_data_vs_fake_data.png"))
+## load results
 contactrates = load(projectdir("data","inferred_contact_rates.csv")) |> DataFrame
-
+## =============================================================================
+# decomposition
+using TimeSeriesDecompositions
 slowtrends = decompose(contactrates; fdir=projectdir("figures/"))
 save(projectdir("data","smoothed_contact_rates.csv"), slowtrends)
 bson("contacts_decomposition=$(results.problemtype)", Dict(:slowtrends => slowtrends))
+## load results
+slowtrends = load(projectdir("data","smoothed_contact_rates.csv"))
 BSON.load("survey_inference_results_method=ZINegBinomialProblem.bson")
 ##
 p = plot_comparison_with_SSI(contactrates);
