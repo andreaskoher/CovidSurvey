@@ -3,7 +3,6 @@ module National
 using DrWatson
 using Turing
 using StatsBase
-using ArgCheck
 using RData
 # using DrWatson
 using CSV
@@ -21,8 +20,8 @@ using LaTeXStrings
 using AbstractGPs
 using KernelFunctions
 using TemporalGPs
-using StaticArrays
-using QuadGK
+# using StaticArrays
+# using QuadGK
 # using
 
 using ..CovidSurvey#: NegativeBinomial2
