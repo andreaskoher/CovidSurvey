@@ -22,7 +22,7 @@ nthreads()
 name2model = Dict(
     "v3" => National.model_v3,
     "v2"        => National.model_v2,
-    "gp"        => National.model_gp,
+    #"gp"        => National.model_gp,
     # "contacts" => National.model_contacts,
     "contacts2" => National.model_contacts_v2,
     "contacts3" => National.model_contacts_v3,
@@ -53,13 +53,15 @@ fname = savename("chains", ps, "")
 Random.seed!(ps.seed);
 @info ps
 
-data = Regional.load_data(;
+data = National.load_data(;
     observations_end  = ps.observ,
     predictors        = ps.preds |> CovidSurvey.parse_predictors,
     cases_start       = ps.cases,
     rw_step           = 1,
     epidemic_start    = 30,
     num_impute        = 6,
+    deathmodel        = National.DeathInit(obs_stop="$( Date(ps.cases) + Day(1))"),
+    casemodel         = National.CaseInit(obs_start=ps.cases),
     link              = KLogistic(3.),
     invlink           = KLogit(3.),
     lockdown          = "2020-03-18",
@@ -67,40 +69,12 @@ data = Regional.load_data(;
         :fname => projectdir("data","smoothed_contact_rates.csv"),
         :shift => -1,
         :startdate => "2020-11-10",
-        :enddate => nothing
-    )
-)
+        :enddate => nothing))
 turing_data = data.turing_data;
-
-# num_obs = turing_data.cases|>length
-# lockdown = turing_data.lockdown
-# covariates_start = turing_data.covariates_start
-# num_Rt_steps   = covariates_start-lockdown-1
-# num_obs
-# lockdown + num_Rt_steps + size(covariates, 1)
-# covariates = turing_data.covariates
-# size(covariates, 1)
-#
-# length(turing_data.cases)
-#
-# fname = normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" )
-# survey = load( fname )|>DataFrame
-# National.readcovariates(; covariates_kwargs...
-# )
-
-# findfirst(==(Date("2021-01-01")),data.dates) - findfirst(==(Date("2020-05-15")),data.dates) + 1
-# findfirst(==(Date("2021-01-01")),data.dates)
-# size(survey, 1)
-#
-#
-# data.dates
-#
-# covariates[140,1]
-# size(turing_data.covariates,1) - turing_data.covariates_start
 #----------------------------------------------------------------------------
 # sample model
 model = name2model[ps.model]
-model = Regional.model_hospit
+model = National.model_cases
 m = model(turing_data, false)
 Turing.emptyrdcache()
 m()
@@ -108,37 +82,11 @@ m()
 
 @time chain = sample(m, NUTS(ps.warmup, 0.95), MCMCThreads(), ps.steps + ps.warmup, 3)
 # using MCMCChains
-
-function trysample(m, ps)
-    try
-        @time chain = sample(m, NUTS(ps.warmup, 0.95), ps.steps + ps.warmup; progress=true)
-        return chain
-    catch
-        return nothing
-    end
-end
-
-function runsim(m,ps)
-    for i in 1:5
-        @info "trial number $i"
-        chain = trysample(m,ps)
-        !isnothing(chain) && return chain
-    end
-    @error "exceeded number of failed trials"
-end
-
-chain = runsim(m,ps)
-
-# @time chain = sample(m, NUTS(ps.warmup, 0.99; max_depth=5), MCMCThreads(), ps.steps + ps.warmup, 3; progress=false)
-# chain = chain2 |> deepcopy
 chain = chain[ps.warmup+1:end,:,:]
 # chain = chain[:,:,[2,4]]
 
 @info "Saving at: $(projectdir("out", fname))"
 safesave(projectdir("out/tmp", fname*".jls"), chain)
-
-
-
 ##
 diagnostics = gelmandiag(chain)
 fname_diagnostics = projectdir("out/tmp", fname*"_GELMANDIAG.csv")
@@ -150,11 +98,11 @@ safesave(fname_diagnostics, diagnostics)
 m_pred = model(turing_data, true)
 gq = Turing.generated_quantities(m_pred, chain)
 generated_posterior = vectup2tupvec( reshape(gq, length(gq)) );
-generated_posterior = Regional.posterior(model, turing_data, chain)
+# generated_posterior = Regional.posterior(model, turing_data, chain)
 #---------------------------------------------------------------------------
 # plot results
 plotlyjs()
-p = National.plot(data, generated_posterior);
+p = National.plot(data, generated_posterior)
 savefig(p, "/home/and/tmp/figures/"*fname*".html")
 # savefig(p, projectdir("figures/tmp", fname*".png") )
 run(`firefox $("/home/and/tmp/figures/"*fname*".html")`, wait=false)
@@ -578,3 +526,77 @@ delay_distr = National.inf2hosp(length(t))
 hospit = data.hospit
 df = DataFrame((; date, hospit, serial_interval, delay_distr))
 save("/home/and/code/StudentProject/covid19model.csv", df)
+
+## ============================================================================
+θ = turing_data
+predict = false
+TV = Vector{Float64}
+
+@unpack num_observations, num_total_days, num_rt_steps, invlink, deathmodel = θ
+# If we don't want to predict the future, we only need to compute up-to time-step `num_obs_countries[m]`
+num_time_steps   = predict ? num_total_days : num_observations
+num_time_steps_2 = predict ? num_total_days : deathmodel.stop
+############# 2.) time varying reproduction number
+
+R0         = truncated(Normal(3., 1.), 1., 5.)  |>rand
+R1         = truncated(Normal(.8, .1), .5, 1.1)  |>rand
+σ_rt       = truncated(Normal(0.1, .05), 0, .25)  |>rand
+latent_Rt  = CovidSurvey.RandomWalk(num_rt_steps, σ_rt, invlink(R1))  |>rand
+# @code_warntype logpdf(CovidSurvey.RandomWalk(num_rt_steps, σ_rt, invlink(R1)), latent_Rt)
+
+
+Rt = TV(undef, num_time_steps)
+CovidSurvey.National.random_walks!(Rt, θ, predict, latent_Rt, R0)
+# @code_warntype CovidSurvey.National.random_walks!(Rt, θ, predict, latent_Rt, R0)
+
+############ 3.) infection dynamics
+τ  = Exponential(1 / 0.03)  |> rand
+T  = typeof(τ)
+y  = truncated(Exponential(τ),T(0),T(1000))  |> rand
+
+newly_infected       = TV(undef, num_time_steps)
+cumulative_infected  = TV(undef, num_time_steps)
+effective_Rt         = TV(undef, num_time_steps)
+
+# infections!(newly_infected, cumulative_infected, θ, τ, y, Rt)
+CovidSurvey.National.infections!(newly_infected, cumulative_infected, effective_Rt, θ, τ, y, Rt)
+@code_warntype CovidSurvey.National.infections!(newly_infected, cumulative_infected, effective_Rt, θ, τ, y, Rt)
+
+########### 4.) derive observables
+μ_i2d = truncated(Normal(20., 4.), 10, 30)  |> rand
+μ_i2c = truncated(Normal(4.5, 1.), 3, 7)  |> rand
+iar   = Beta(1,10)  |> rand
+ifr   = truncated(Normal(6/1000, 3/1000), 2/1000, 10/1000)  |> rand
+# ihr   ~ truncated(Normal(1/100,1/100),.1/100,5/100)
+
+### day of week effect
+weekdayeffect_simplex = Dirichlet([7,7,7,7,7,3,1])  |> rand
+weekdayeffect = TV(undef, 7)
+weekdayeffect!(weekdayeffect, weekdayeffect_simplex)
+@code_warntype weekdayeffect!(weekdayeffect, weekdayeffect_simplex)
+
+### holiday effect
+holidayeffect = Beta(1,1)  |> rand
+
+########### 3.) observation model
+expected_daily_deaths = TV(undef, num_time_steps_2)
+expected_daily_cases  = TV(undef, num_time_steps)
+
+ϕ_c = truncated(Normal(50, 10), 30, Inf)  |> rand
+ϕ_d = truncated(Normal(30, 10), 5, Inf)  |> rand
+
+cmodel = National.WeekdayHolidayObsModel(
+    θ.casemodel, μ_i2d, iar, ϕ_c, expected_daily_cases, weekdayeffect, holidayeffect
+)
+dmodel = National.SimpleObsModel(θ.deathmodel, μ_i2d, ifr, ϕ_d, expected_daily_deaths)
+
+National.expected!(expected_daily_deaths, dmodel, newly_infected)
+@code_warntype National.expected!(expected_daily_deaths, dmodel, newly_infected)
+National.expected!(expected_daily_cases, cmodel, newly_infected)
+@code_warntype National.expected!(expected_daily_cases, cmodel, newly_infected)
+
+ℓ  = zero(Float64)
+ℓ += logpdf(cmodel, θ.cases)
+ℓ += logpdf(dmodel, θ.deaths)
+@code_warntype logpdf(cmodel, expected_daily_cases)
+@code_warntype logpdf(dmodel, expected_daily_deaths)

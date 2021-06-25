@@ -1,5 +1,23 @@
 using ..CovidSurvey: RandomWalk
 
+struct WeekdayHolidayObsModel{T,M,A,P,E,W,H} <: ObservationsModel
+    θ::T
+    μ::M
+    α::A
+    ϕ::P
+	expected::E
+    weekdayeffect::W
+    holidayeffect::H
+end
+
+struct SimpleObsModel{T,M,A,P,E} <: ObservationsModel
+    θ::T
+    μ::M
+    α::A
+    ϕ::P
+	expected::E
+end
+
 # ============================================================================
 # random walk model
 function random_walks!(Rt, θ, predict, latent_Rt, R0)
@@ -57,37 +75,79 @@ end
 
 # ============================================================================
 # observations
-function infection2hospit(θ, μ_i2h)
-	@unpack ϕ_i2h, num_i2h = θ
-	i2h = pdf.( Ref(NegativeBinomial2(μ_i2h, ϕ_i2h)), 1:num_i2h )
-	i2h /= sum(i2h)
-	return i2h
+function inf2obs(param, μ)
+	@unpack delay_dispersion, delay_length, delay_dist = param
+	i2o = pdf.( Ref(delay_dist(μ, delay_dispersion)), 1:delay_length )
+	i2o /= sum(i2o)
+	return i2o
 end
 
-function hospitalizations!(expected_daily_hospit, θ, μ_i2h, ihr, newly_infected)
-	@unpack num_i2h = θ
+infectious(t, newly_infected, i2o, stop) =
+    sum(newly_infected[τ] * i2o[t - τ] for τ = (t - 1):-1:stop)
 
-	i2h           = infection2hospit(θ, μ_i2h)
-	num_time_step = length(expected_daily_hospit)
+_expected!(expected, t, α, args...) =
+	@inbounds expected[t] = α * infectious(t, args...)
 
-	expected_daily_hospit[1] = 1e-15 * newly_infected[1]
-	for t = 2:num_time_step
-		expected_daily_hospit[t] = ihr * sum(newly_infected[τ] * i2h[t - τ] for τ = (t - 1):-1:max(t-num_i2h,1))
+function expected!(expected, obsmodel::SimpleObsModel, newly_infected)
+	@unpack θ, μ, α = obsmodel
+	@unpack delay_length = θ
+
+	i2o = inf2obs(θ, μ)
+	num_time_step = length(expected)
+
+	@inbounds expected[1] = 1e-15 * newly_infected[1]
+	for t = 2:delay_length+1
+		_expected!(expected, t, α, newly_infected, i2o, 1)
+	end
+	for t = delay_length+2:num_time_step
+		_expected!(expected, t, α, newly_infected, i2o, t-delay_length)
 	end
 	return nothing
 end
 
-function observe_hospitalizations(θ, expected_daily_hospit, ϕ_h)
-	@unpack population, num_observations, hospit, epidemic_start = θ
+function expected!(expected, obsmodel::WeekdayHolidayObsModel, newly_infected)
+	@unpack θ, μ, α, holidayeffect, weekdayeffect = obsmodel
+	@unpack delay_length, holiday, weekday = θ
 
-	ℓ     = 0.
-	T     = typeof(ℓ)
-	ts_h  = epidemic_start:num_observations
-	μs_h  = expected_daily_hospit[ts_h]
-	!all( 0 .< μs_h .< population ) && (@error "expected_daily_hospit"; return T(Inf))
-	dist  = arraydist(NegativeBinomial2.(μs_h, ϕ_h))
-	ℓ += logpdf(dist, hospit[ts_h])
-	return ℓ
+	i2o = inf2obs(θ, μ)
+	num_time_step = length(expected)
+
+	@inbounds expected[1] = 1e-15 * newly_infected[1]
+	for t = 2:delay_length+1
+		weekday_holiday_effect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
+		_expected!(expected, t, α * weekday_holiday_effect, newly_infected, i2o, 1)
+	end
+	for t = delay_length+2:num_time_step
+		weekday_holiday_effect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
+		_expected!(expected, t, α, newly_infected, i2o, t-delay_length)
+	end
+	return nothing
+end
+
+_out_of_bounds(x, upper_lim) = !all(@. 0 < x < upper_lim )
+
+function Turing.logpdf(obsmodel::ObservationsModel, observed)
+	@unpack θ, ϕ, expected = obsmodel
+	@unpack population, start, stop = θ
+
+	T     = eltype(observed)
+	ts    = start:stop
+	μs = expected[ts]
+	ys = observed[ts]
+	_out_of_bounds(μs, population) && (return T(Inf))
+	dist  = arraydist(NegativeBinomial2.(μs, ϕ))
+	return logpdf(dist, ys)
+end
+
+
+
+# =============================================================================
+
+function weekdayeffect!(weekdayeffect, weekdayeffect_simplex)
+	num_days = 7
+	for i in eachindex(weekdayeffect)
+		@inbounds weekdayeffect[i] = weekdayeffect_simplex[i] * num_days
+	end
 end
 
 # struct WeekDayEffect{Tα} <: ContinuousMultivariateDistribution
@@ -1421,157 +1481,157 @@ end
 #---------------------------------------------------------------------------------------
 # GP for Rt
 
-struct MvNormalGP{T<:AbstractGPs.FiniteGP} <: AbstractMvNormal
-    f::T
-end
-AbstractGPs.rand(rng::Random.AbstractRNG, f::MvNormalGP) = rand(rng, f.f)
-AbstractGPs.logpdf(f::MvNormalGP, y::AbstractVector{<:Real}) = logpdf(f.f, y)
-
-kernel(s::Real, l::Real) =
-    s^2 * KernelFunctions.transform(Matern32Kernel(), 1/l)
-
-@model function model_gp(
-    num_impute,        # [Int] num. of days for which to impute infections
-    num_total_days,    # [Int] days of observed data + num. of days to forecast
-    cases,            # [AbstractVector{<:AbstractVector{<:Int}}] reported infected
-    deaths,            # [AbstractVector{<:AbstractVector{<:Int}}] reported deaths; rows indexed by i > N contain -1 and should be ignored
-    π,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
-    π2,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
-    epidemic_start,    # [AbstractVector{<:Int}]
-    population,        # [AbstractVector{<:Real}]
-    serial_intervals,  # [AbstractVector{<:Real}] fixed pre-calculated serial interval (SI) using empirical data from Neil
-    lockdown,         # [Int] number of weeks (21)
-    num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
-    π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
-    hospit,
-	seroprev_mean,
-    seroprev_std,
-    seroprev_idx,
-    predict=false,     # [Bool] if `false`, will only compute what's needed to `observe` but not more
-    ::Type{TV} = Vector{Float64},
-	::Type{V}  = Float64
-) where {TV, V}
-	num_si = length(serial_intervals)
-	num_π = length(π)
-	num_π2 = length(π2)
-	num_π3 = length(π3)
-	num_obs = length(cases)
-	num_Rt_steps = num_obs - lockdown
-    num_obs = length(cases)
-    # If we don't want to predict the future, we only need to compute up-to time-step `num_obs_states[m]`
-    num_time_steps = predict ? num_total_days : num_obs
-
-    # Latent variables
-    # τ         ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
-	# T = typeof(τ)
-    # y         ~ truncated(Exponential(τ),T(0),T(1000))
-	y         ~ truncated(Exponential(100),0.,1000.)
-	ϕ         ~ truncated(Normal(0, 5), 0, Inf)
-    ϕ2        ~ truncated(Normal(25, 5), 10, 40)
-    ϕ3        ~ truncated(Normal(25, 5), 10, 40)
-	R0        ~ truncated(Normal(3.28, .4), 2, 4)
-	R1        ~ truncated(Normal(.8, .2), .5, 1.2)
-    ifr_noise ~ truncated(Normal(1., 0.2), 0, Inf)
-	ihr       ~ truncated(Normal(2/100,2/100),.1/100,6/100)
-    iar0      ~ Beta(10,40) #Beta(20,25)
-	# σ_rt      ~ InverseGamma2(0.2, .3)
-	σ_rt      = .1
-	σ_iar     = .05
-	# seroprev_σ ~ arraydist(InverseGamma2.(seroprev_std, Ref(.01)))
-	# seroprev_μ ~ MvNormal(seroprev_mean, seroprev_mean*.01)
-
-	!isfinite(R0) && (@error "R0"; Turing.@addlogprob! -Inf; return) #DEBUG
-	population < num_impute*y && (@error "population < num_impute*y"; Turing.@addlogprob! -Inf; return) #DEBUG
-	y<0 && (@error "y<0"; Turing.@addlogprob! -Inf; return) #DEBUG
-
-    infected              = TV(undef, num_time_steps)
-    expected_daily_cases  = TV(undef, num_time_steps)
-    expected_daily_hospit = TV(undef, num_time_steps)
-    cumcases              = TV(undef, num_time_steps)
-    expected_daily_deaths = TV(undef, num_time_steps)
-    logRt                 = TV(undef, num_time_steps)
-    Rt_adj                = TV(undef, num_time_steps)
-	latent_iar             = TV(undef, num_time_steps)
-
-    # Imputation of `num_impute` days
-    infected[1:num_impute] .= y
-    cumcases[1] = zero(V)
-    cumcases[2:num_impute] .= cumsum(infected[1:num_impute - 1])
-
-	gp = GP(kernel(.3, 20.))
-	f = to_sde(gp, SArrayStorage(Float64))
-	X = RegularSpacing(0.0, 1., num_obs - lockdown)
-    slow_Rt_effect ~ MvNormalGP( f(X) )
-
-	logRt[1:lockdown] .= log(R0)
-	logRt[lockdown+1:num_obs] = slow_Rt_effect .- slow_Rt_effect[1] .+ log(R1)
-	if predict #if prediction
-		logRt[num_obs+1:num_total_days] .= logRt[num_obs]
-	end
-
-	# Adjusts for portion of pop that are susceptible
-    @. Rt_adj[1:num_impute] = (max(population - cumcases[1:num_impute], zero(V)) / population) * exp(logRt[1:num_impute])
-    for t = (num_impute + 1):num_time_steps
-        # Update cumulative infected
-        cumcases[t] = cumcases[t - 1] + infected[t - 1]
-        # Adjusts for portion of pop that are susceptible
-        susceptible = (max(population - cumcases[t], zero(V)) / population)
-        Rt_adj[t] = susceptible * exp(logRt[t])
-        infected[t] = Rt_adj[t] * sum(infected[τ] * serial_intervals[t - τ] for τ = (t - 1):-1:max(t-num_si,1)) #max(t-50, 1)
-    end
-	any( infected .< 0 ) && (i = findfirst(<(0), infected); @error "infected<0 at $(i)"; Turing.@addlogprob! -Inf; return)
-	any( .! isfinite.(infected) ) && (i = findfirst(x->!isfinite(x), infected); @error "infected is not finite at $(i)"; Turing.@addlogprob! -Inf; return)
-	any( infected .> population ) && (i = findfirst(>(population), infected); @error "infected>population at $(i)"; Turing.@addlogprob! -Inf; return)
-
-	cases_start = num_obs - num_case_obs + 1
-	latent_iar[1:cases_start-1] .= logit(iar0)
-	if num_case_obs > 0
-		gp = GP(kernel(.3, 20.))
-		f = to_sde(gp, SArrayStorage(Float64))
-		X = RegularSpacing(0.0, 1., num_case_obs)
-		slow_IAR_effect ~ MvNormalGP( f(X) )
-		latent_iar[cases_start:num_obs] = slow_IAR_effect .- slow_IAR_effect[1] .+ logit(iar0)
-	end
-	if predict #if prediction
-		latent_iar[num_obs+1:num_total_days] .= latent_iar[num_obs]
-	end
-	iar = logistic.(latent_iar)
-
-    expected_daily_deaths[1] = 1e-15 * infected[1]
-	expected_daily_hospit[1] = 1e-15 * infected[1]
-	expected_daily_cases[1] = infected[1]
-    for t = 2:num_time_steps
-		expected_daily_deaths[t] = ifr_noise * sum(infected[τ] * π[t - τ] for τ = (t - 1):-1:max(t-num_π,1)) #max(t-100, 1)
-        expected_daily_cases[t]  = sum(infected[τ] * π2[t - τ] for τ = (t - 1):-1:max(t-num_π2,1)) #max(t-30, 1)
-        expected_daily_hospit[t] = ihr * sum(infected[τ] * π3[t - τ] for τ = (t - 1):-1:max(t-num_π3,1)) #max(t-50, 1)
-    end
-	observed_daily_cases = iar .* expected_daily_cases
-	# Extract time-steps for which we have observations
-
-	ts = epidemic_start:num_obs
-	# μs  = expected_daily_deaths[ts]
-	# σ2s = @. μs + μs^2 / ϕ
-    # deaths[ts] ~ arraydist(NegativeBinomial3.(μs, σ2s))
-	μs  = expected_daily_hospit[ts]
-	σ2s = @. μs + μs^2 / ϕ3
-	hospit[ts] ~ arraydist(NegativeBinomial3.(μs, σ2s))
-    if num_case_obs > 0
-		ts = (num_obs-num_case_obs):num_obs
-		μs  = observed_daily_cases[ts]
-		σ2s = @. μs + μs^2 / ϕ2
-        cases[ts] ~ arraydist(NegativeBinomial3.(μs, σ2s))
-    end
-
-    # seroprevalence study
-	seroprev_mean ~ MvNormal(cumcases[seroprev_idx], seroprev_std)
-	# seroprev_μ ~ MvNormal(cumcases[seroprev_idx], seroprev_σ)
-
-    return (
-		observed_daily_cases  = observed_daily_cases,
-        expected_daily_deaths = expected_daily_deaths,
-        expected_daily_hospit = expected_daily_hospit,
-        Rt = exp.(logRt),
-		cumulative_cases      = cumcases,
-		iar = iar
-    )
-end
+# struct MvNormalGP{T<:AbstractGPs.FiniteGP} <: AbstractMvNormal
+#     f::T
+# end
+# AbstractGPs.rand(rng::Random.AbstractRNG, f::MvNormalGP) = rand(rng, f.f)
+# AbstractGPs.logpdf(f::MvNormalGP, y::AbstractVector{<:Real}) = logpdf(f.f, y)
+#
+# kernel(s::Real, l::Real) =
+#     s^2 * KernelFunctions.transform(Matern32Kernel(), 1/l)
+#
+# @model function model_gp(
+#     num_impute,        # [Int] num. of days for which to impute infections
+#     num_total_days,    # [Int] days of observed data + num. of days to forecast
+#     cases,            # [AbstractVector{<:AbstractVector{<:Int}}] reported infected
+#     deaths,            # [AbstractVector{<:AbstractVector{<:Int}}] reported deaths; rows indexed by i > N contain -1 and should be ignored
+#     π,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
+#     π2,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
+#     epidemic_start,    # [AbstractVector{<:Int}]
+#     population,        # [AbstractVector{<:Real}]
+#     serial_intervals,  # [AbstractVector{<:Real}] fixed pre-calculated serial interval (SI) using empirical data from Neil
+#     lockdown,         # [Int] number of weeks (21)
+#     num_case_obs,       # [Int] 21 = max_date ("2020-05-11") - testing_date (2020-05-11) see publication
+#     π3,                 # [AbstractVector{<:AbstractVector{<:Real}}] h * s
+#     hospit,
+# 	seroprev_mean,
+#     seroprev_std,
+#     seroprev_idx,
+#     predict=false,     # [Bool] if `false`, will only compute what's needed to `observe` but not more
+#     ::Type{TV} = Vector{Float64},
+# 	::Type{V}  = Float64
+# ) where {TV, V}
+# 	num_si = length(serial_intervals)
+# 	num_π = length(π)
+# 	num_π2 = length(π2)
+# 	num_π3 = length(π3)
+# 	num_obs = length(cases)
+# 	num_Rt_steps = num_obs - lockdown
+#     num_obs = length(cases)
+#     # If we don't want to predict the future, we only need to compute up-to time-step `num_obs_states[m]`
+#     num_time_steps = predict ? num_total_days : num_obs
+#
+#     # Latent variables
+#     # τ         ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
+# 	# T = typeof(τ)
+#     # y         ~ truncated(Exponential(τ),T(0),T(1000))
+# 	y         ~ truncated(Exponential(100),0.,1000.)
+# 	ϕ         ~ truncated(Normal(0, 5), 0, Inf)
+#     ϕ2        ~ truncated(Normal(25, 5), 10, 40)
+#     ϕ3        ~ truncated(Normal(25, 5), 10, 40)
+# 	R0        ~ truncated(Normal(3.28, .4), 2, 4)
+# 	R1        ~ truncated(Normal(.8, .2), .5, 1.2)
+#     ifr_noise ~ truncated(Normal(1., 0.2), 0, Inf)
+# 	ihr       ~ truncated(Normal(2/100,2/100),.1/100,6/100)
+#     iar0      ~ Beta(10,40) #Beta(20,25)
+# 	# σ_rt      ~ InverseGamma2(0.2, .3)
+# 	σ_rt      = .1
+# 	σ_iar     = .05
+# 	# seroprev_σ ~ arraydist(InverseGamma2.(seroprev_std, Ref(.01)))
+# 	# seroprev_μ ~ MvNormal(seroprev_mean, seroprev_mean*.01)
+#
+# 	!isfinite(R0) && (@error "R0"; Turing.@addlogprob! -Inf; return) #DEBUG
+# 	population < num_impute*y && (@error "population < num_impute*y"; Turing.@addlogprob! -Inf; return) #DEBUG
+# 	y<0 && (@error "y<0"; Turing.@addlogprob! -Inf; return) #DEBUG
+#
+#     infected              = TV(undef, num_time_steps)
+#     expected_daily_cases  = TV(undef, num_time_steps)
+#     expected_daily_hospit = TV(undef, num_time_steps)
+#     cumcases              = TV(undef, num_time_steps)
+#     expected_daily_deaths = TV(undef, num_time_steps)
+#     logRt                 = TV(undef, num_time_steps)
+#     Rt_adj                = TV(undef, num_time_steps)
+# 	latent_iar             = TV(undef, num_time_steps)
+#
+#     # Imputation of `num_impute` days
+#     infected[1:num_impute] .= y
+#     cumcases[1] = zero(V)
+#     cumcases[2:num_impute] .= cumsum(infected[1:num_impute - 1])
+#
+# 	gp = GP(kernel(.3, 20.))
+# 	f = to_sde(gp, SArrayStorage(Float64))
+# 	X = RegularSpacing(0.0, 1., num_obs - lockdown)
+#     slow_Rt_effect ~ MvNormalGP( f(X) )
+#
+# 	logRt[1:lockdown] .= log(R0)
+# 	logRt[lockdown+1:num_obs] = slow_Rt_effect .- slow_Rt_effect[1] .+ log(R1)
+# 	if predict #if prediction
+# 		logRt[num_obs+1:num_total_days] .= logRt[num_obs]
+# 	end
+#
+# 	# Adjusts for portion of pop that are susceptible
+#     @. Rt_adj[1:num_impute] = (max(population - cumcases[1:num_impute], zero(V)) / population) * exp(logRt[1:num_impute])
+#     for t = (num_impute + 1):num_time_steps
+#         # Update cumulative infected
+#         cumcases[t] = cumcases[t - 1] + infected[t - 1]
+#         # Adjusts for portion of pop that are susceptible
+#         susceptible = (max(population - cumcases[t], zero(V)) / population)
+#         Rt_adj[t] = susceptible * exp(logRt[t])
+#         infected[t] = Rt_adj[t] * sum(infected[τ] * serial_intervals[t - τ] for τ = (t - 1):-1:max(t-num_si,1)) #max(t-50, 1)
+#     end
+# 	any( infected .< 0 ) && (i = findfirst(<(0), infected); @error "infected<0 at $(i)"; Turing.@addlogprob! -Inf; return)
+# 	any( .! isfinite.(infected) ) && (i = findfirst(x->!isfinite(x), infected); @error "infected is not finite at $(i)"; Turing.@addlogprob! -Inf; return)
+# 	any( infected .> population ) && (i = findfirst(>(population), infected); @error "infected>population at $(i)"; Turing.@addlogprob! -Inf; return)
+#
+# 	cases_start = num_obs - num_case_obs + 1
+# 	latent_iar[1:cases_start-1] .= logit(iar0)
+# 	if num_case_obs > 0
+# 		gp = GP(kernel(.3, 20.))
+# 		f = to_sde(gp, SArrayStorage(Float64))
+# 		X = RegularSpacing(0.0, 1., num_case_obs)
+# 		slow_IAR_effect ~ MvNormalGP( f(X) )
+# 		latent_iar[cases_start:num_obs] = slow_IAR_effect .- slow_IAR_effect[1] .+ logit(iar0)
+# 	end
+# 	if predict #if prediction
+# 		latent_iar[num_obs+1:num_total_days] .= latent_iar[num_obs]
+# 	end
+# 	iar = logistic.(latent_iar)
+#
+#     expected_daily_deaths[1] = 1e-15 * infected[1]
+# 	expected_daily_hospit[1] = 1e-15 * infected[1]
+# 	expected_daily_cases[1] = infected[1]
+#     for t = 2:num_time_steps
+# 		expected_daily_deaths[t] = ifr_noise * sum(infected[τ] * π[t - τ] for τ = (t - 1):-1:max(t-num_π,1)) #max(t-100, 1)
+#         expected_daily_cases[t]  = sum(infected[τ] * π2[t - τ] for τ = (t - 1):-1:max(t-num_π2,1)) #max(t-30, 1)
+#         expected_daily_hospit[t] = ihr * sum(infected[τ] * π3[t - τ] for τ = (t - 1):-1:max(t-num_π3,1)) #max(t-50, 1)
+#     end
+# 	observed_daily_cases = iar .* expected_daily_cases
+# 	# Extract time-steps for which we have observations
+#
+# 	ts = epidemic_start:num_obs
+# 	# μs  = expected_daily_deaths[ts]
+# 	# σ2s = @. μs + μs^2 / ϕ
+#     # deaths[ts] ~ arraydist(NegativeBinomial3.(μs, σ2s))
+# 	μs  = expected_daily_hospit[ts]
+# 	σ2s = @. μs + μs^2 / ϕ3
+# 	hospit[ts] ~ arraydist(NegativeBinomial3.(μs, σ2s))
+#     if num_case_obs > 0
+# 		ts = (num_obs-num_case_obs):num_obs
+# 		μs  = observed_daily_cases[ts]
+# 		σ2s = @. μs + μs^2 / ϕ2
+#         cases[ts] ~ arraydist(NegativeBinomial3.(μs, σ2s))
+#     end
+#
+#     # seroprevalence study
+# 	seroprev_mean ~ MvNormal(cumcases[seroprev_idx], seroprev_std)
+# 	# seroprev_μ ~ MvNormal(cumcases[seroprev_idx], seroprev_σ)
+#
+#     return (
+# 		observed_daily_cases  = observed_daily_cases,
+#         expected_daily_deaths = expected_daily_deaths,
+#         expected_daily_hospit = expected_daily_hospit,
+#         Rt = exp.(logRt),
+# 		cumulative_cases      = cumcases,
+# 		iar = iar
+#     )
+# end

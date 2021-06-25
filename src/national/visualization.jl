@@ -7,39 +7,86 @@ Plots.plot(pr::PlottingRecipe, args...) = plot!(plot(), pr, args...)
 # =============================================================================
 # hospitalizations
 
-struct HospitPlottingRecipe{Tsd, Ted, To, Te} <: PlottingRecipe
+struct ObservationsPlottingRecipe{Tsd, Ted, To, Te, Tl} <: PlottingRecipe
     startdate ::Tsd
     enddate   ::Ted
     observed  ::To
     expected  ::Te
+    label     ::Tl
 end
 
-function HospitPlottingRecipe(data::National.Data, generated_posterior)
-    expected = let
-        dates  = data.dates
-        values = generated_posterior.expected_daily_hospit
-        (; dates, values )
+function expected(data, gp, label)
+    @assert label in ["cases", "hospit", "deaths"]
+    dates  = data.dates
+    if label == "cases"
+        values = gp.expected_daily_cases
+        return (; dates, values )
+    elseif label == "hospit"
+        values = gp.expected_daily_hospit
+        return (; dates, values )
+    else
+        values = gp.expected_daily_deaths
+        return (; dates, values )
     end
-    observed = let
-        dates  = data.hospit.date
+end
+
+function observed(data, label)
+    @assert label in ["cases", "hospit", "deaths"]
+    dates  = data.hospit.date
+    if label == "cases"
+        values = data.cases.country
+        return (; dates, values )
+    elseif label == "hospit"
         values = data.hospit.country
-        (; dates, values )
+        return (; dates, values )
+    else
+        values = data.deaths.country
+        return (; dates, values )
     end
-    startdate = Date(data.startdates)
-    enddate   = Date(data.observations_end)
-    HospitPlottingRecipe( startdate, enddate, observed, expected)
 end
 
-function Plots.plot!(p::Plots.Plot, hospit::HospitPlottingRecipe)
-    o  = hospit.observed
-    e  = hospit.expected
-    ed = hospit.enddate
-    sd = hospit.startdate
+function startdate(data::National.Data, label::String)
+    @assert label in ["cases", "hospit", "deaths"]
+    s = if label == "cases"
+        data.turing_data.casemodel.start
+    elseif label == "hospit"
+        data.turing_data.hospitmodel.start
+    else
+        data.turing_data.deathmodel.start
+    end
+    return data.dates[s]
+end
 
-    plot!(p, o.dates, o.values, α=0.5, lc=:match, lab="observed hospitalizations", c=:midnightblue, lw=4, ylab="cases")
+function enddate(data::National.Data, label::String)
+    @assert label in ["cases", "hospit", "deaths"]
+    s = if label == "cases"
+        data.turing_data.casemodel.stop
+    elseif label == "hospit"
+        data.turing_data.hospitmodel.stop
+    else
+        data.turing_data.deathmodel.stop
+    end
+    return data.dates[s]
+end
+
+function ObservationsPlottingRecipe(data::National.Data, gp, label)
+    e = expected(data, gp, label)
+    o = observed(data, label)
+    sd = startdate(data, label)
+    ed = enddate(data, label)
+    return ObservationsPlottingRecipe( sd, ed, o, e, label)
+end
+
+function Plots.plot!(p::Plots.Plot, r::ObservationsPlottingRecipe)
+    o  = r.observed
+    e  = r.expected
+    ed = r.enddate
+    sd = r.startdate
+
+    plot!(p, o.dates, o.values, α=0.5, lc=:match, lab="observed $(r.label)", c=:midnightblue, lw=4, ylab="cases")
     vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
     vline!(p, [sd], lab="start observations", lw=2, lc=:black, hover="$sd", ls=:dash)
-    plot_confidence_timeseries!(p, e.dates, e.values; label = "expected hospitalizations") #Dict(hover=>strdates)
+    plot_confidence_timeseries!(p, e.dates, e.values; label = "expected $(r.label)") #Dict(hover=>strdates)
 end
 
 # ============================================================================
@@ -51,7 +98,7 @@ struct RtPlottingRecipe{Tlo, Ted, Te} <: National.PlottingRecipe
     expected  ::Te
 end
 
-function RtPlottingRecipe(data::National.Data, generated_posterior)
+function RtPlottingRecipe(data::National.Data, generated_posterior, args...)
     dates      = data.dates
     values     = generated_posterior.Rt
     expected   = (; dates, values )
@@ -60,10 +107,10 @@ function RtPlottingRecipe(data::National.Data, generated_posterior)
     RtPlottingRecipe( lockdown, enddates, expected)
 end
 
-function Plots.plot!(p::Plots.Plot, rt::RtPlottingRecipe)
-    e  = rt.expected
-    ed = rt.enddates
-    lo = rt.lockdown
+function Plots.plot!(p::Plots.Plot, r::RtPlottingRecipe)
+    e  = r.expected
+    ed = r.enddates
+    lo = r.lockdown
 
     vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
     vline!(p, [lo], lab="lockdown", lw=2, lc=:black, hover="$lo", ls=:dash)
@@ -79,31 +126,35 @@ struct OverviewPlottingRecipe{Tr,Tt} <: National.PlottingRecipe
 end
 
 posterior2recipe = OrderedDict(
-    :expected_daily_hospit => National.HospitPlottingRecipe,
+    :expected_daily_cases  => National.ObservationsPlottingRecipe,
+    :expected_daily_hospit => National.ObservationsPlottingRecipe,
+    :expected_daily_deaths => National.ObservationsPlottingRecipe,
     :Rt                    => National.RtPlottingRecipe
 )
 
-posterior2title = OrderedDict(
-    :expected_daily_hospit => "daily hospitalizations",
-    :Rt                    => "effective reproduction number"
+posterior2label = OrderedDict(
+    :expected_daily_cases  => "cases",
+    :expected_daily_hospit => "hospitalizations",
+    :expected_daily_deaths => "deaths",
+    :Rt                    => "reproduction number"
 )
 
 function OverviewPlottingRecipe(data::National.Data, generated_posterior)
     ks = keys(generated_posterior)
     recipes = Vector{National.PlottingRecipe}()
-    titles  = Vector{String}()
+    labels  = Vector{String}()
     for (k,recipe) in posterior2recipe
         if k in ks
-            r = recipe(data, generated_posterior)
-            title  = posterior2title[k]
+            label = posterior2label[k]
+            r     = recipe(data, generated_posterior, label)
             push!(recipes, r)
-            push!(titles, title)
+            push!(labels, label)
         end
     end
-    OverviewPlottingRecipe(recipes, titles)
+    OverviewPlottingRecipe(recipes, labels)
 end
 
-function Plots.plot!(p::Plots.Plot, r::OverviewPlottingRecipe)
+function Plots.plot(r::OverviewPlottingRecipe)
     plots  = Vector{Plots.Plot}()
     nplots = length(r.recipes)
     for (recipe, title) in zip(r.recipes, r.titles)
@@ -111,12 +162,12 @@ function Plots.plot!(p::Plots.Plot, r::OverviewPlottingRecipe)
         plot!(p, recipe)
         push!(plots, p)
     end
-    plot!(p, plots..., layout=(nplots,1), size=(1000, nplots*250), sharex=true, link=:x)
+    plot(plots..., layout=(nplots,1), size=(1000, nplots*250), sharex=true, link=:x)
 end
 
-Plots.plot!(p::Plots.Plot, data::National.Data, generated_posterior) =
+Plots.plot(data::National.Data, generated_posterior) =
     plot( OverviewPlottingRecipe(data, generated_posterior) )
-Plots.plot(data::National.Data, generated_posterior) = plot!(plot(), data, generated_posterior)
+# Plots.plot(data::National.Data, generated_posterior) = plot!(plot(), data, generated_posterior)
 
 
 

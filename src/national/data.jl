@@ -610,6 +610,111 @@ function randomwalk!(data, stepsize=1)
     return nothing
 end
 
+# ============================================================================
+# observation model defaults
+@kwdef struct CaseInit <: ObservationInit
+    obs_start        ::String  = ""
+    obs_stop         ::String  = ""
+    delay_dist                 = NegativeBinomial2
+    delay_length     ::Int64   = 40
+    delay_dispersion ::Float64 = 5.41
+    population       ::Int64   = National.population
+end
+
+@kwdef struct HospitInit <: ObservationInit
+    obs_start        ::String  = ""
+    obs_stop         ::String  = ""
+    delay_dist                 = NegativeBinomial2
+    delay_length     ::Int64   = 40
+    delay_dispersion ::Float64 = 5.41
+    population       ::Int64   = National.population
+end
+
+@kwdef struct DeathInit <: ObservationInit
+    obs_start        ::String  = ""
+    obs_stop         ::String  = ""
+    delay_dist                 = NegativeBinomial2
+    delay_length     ::Int64   = 60
+    delay_dispersion ::Float64 = 14.26
+    population       ::Int64   = National.population
+end
+
+# ==============================================================================
+# observation model
+
+struct ObservParams{SA,SO,DD,DL,DP,P,H,W}
+    start::SA
+    stop::SO
+    delay_dist::DD
+    delay_length::DL
+    delay_dispersion::DP
+    population::P
+    holiday::H
+    weekday::W
+end
+
+function startindex(data, o)
+    dates   = data["dates_turing"]
+    if isempty(o.obs_start)
+        return 1
+    else
+        date = Date(o.obs_start)
+        i = findfirst(==(date), dates)
+        return i
+    end
+end
+
+function stopindex(data, o)
+    dates   = data["dates_turing"]
+    if isempty(o.obs_stop)
+        return data["num_obs"]
+    else
+        date = Date(o.obs_stop)
+        i = findfirst(==(date), dates)
+        return i
+    end
+end
+
+function ObservParams(data, o::ObservationInit)
+    params = (
+        start            = startindex(data, o),
+        stop             = stopindex(data, o),
+        delay_dist       = o.delay_dist,
+        delay_length     = o.delay_length,
+        delay_dispersion = o.delay_dispersion,
+        # observations     = observations(data, o),
+        population       = o.population,
+        holiday          = holiday(data["dates"]),
+        weekday          = dayofweek.(data["dates"])
+    )
+    return ObservParams( params... )
+end
+
+ObservParams!(data, o::CaseInit)   = data["casemodel"]   = ObservParams(data, o)
+ObservParams!(data, o::HospitInit) = data["hospitmodel"] = ObservParams(data, o)
+ObservParams!(data, o::DeathInit)  = data["deathmodel"]  = ObservParams(data, o)
+# ObservParams!(data, o::Sero)    = data["seromodel"]   = ObservParams(data, o)
+
+observations(data, ::CaseInit)   = data["cases_turing"]
+observations(data, ::HospitInit) = data["hospit_turing"]
+observations(data, ::DeathInit)  = data["deaths_turing"]
+
+# function hospitalizations!(data)
+#     params = (
+#         start            = data["cases_start_idx"],
+#         stop             = data["num_observations"]
+#         delay_dist       = NegativeBinomial2,
+#         delay_num        = 40,
+#         delay_dispersion = 5.41,
+#         observations     = data["cases_turing"],
+#         population       = population,
+#     )
+#     data["hospit_model"] = Observations( params... )
+#     return nothing
+# end
+#
+
+
 
 function load_data(;
     observations_end  = nothing,
@@ -619,6 +724,9 @@ function load_data(;
     iar_step          = 1,
     epidemic_start    = 30,
     num_impute        = 6,
+    casemodel         = CaseInit(),
+    hospitmodel       = HospitInit(),
+    deathmodel        = DeathInit(),
     link              = KLogistic(3.),
     invlink           = KLogit(3.),
     lockdown          = "2020-03-18",
@@ -639,7 +747,9 @@ function load_data(;
     lockdown!(data, lockdown)
     seroprev!(data)
     randomwalk!(data, rw_step)
-
+    ObservParams!(data, casemodel)
+    ObservParams!(data, hospitmodel)
+    ObservParams!(data, deathmodel)
     # iar_idx = get_iar_idx(num_tot, num_obs, cases_start_idx, iar_step)
     # num_iar_steps = length(unique(iar_idx))
 
@@ -652,25 +762,26 @@ function load_data(;
     turing_data = (
         num_impute                  = num_impute,
         num_total_days              = data["num_tot"],
+        casemodel                   = data["casemodel"],
         cases                       = data["cases_turing"],
+        deathmodel                  = data["deathmodel"],
         deaths                      = data["deaths_turing"],
         epidemic_start              = epidemic_start,
         population                  = population, #denmark statistics 2020 Q4
         serial_interval             = serialinterval(15),#padzeros(serialinterval(30), 0, num_tot), #data_usa.turing_data.serial_intervals[1:50],
         num_si                      = 15,
         lockdown_index              = data["lockdown_index"],
-        cases_start_index           = data["cases_start_idx"],
-        hospit                      = data["hospit_turing"],
+        hospitmodel                 = data["hospitmodel"],
+        hospits                     = data["hospit_turing"],
         num_rt_steps                = data["num_rt_steps"],
         rt_step_indices             = data["rt_step_index"],
         num_observations            = data["num_obs"],
         link                        = link,
         invlink                     = invlink,
-        num_i2h                     = 40,
-        ϕ_i2h                       = 5.41,
         seroprev_mean               = data["seroprev_mean"],
         seroprev_std                = data["seroprev_std"],
         seroprev_idx                = data["seroprev_idx"],
+
     )
 
     Data(

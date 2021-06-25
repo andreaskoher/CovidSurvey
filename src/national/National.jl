@@ -3,7 +3,8 @@ module National
 using DrWatson
 using Turing
 using StatsBase
-using ArgCheck
+# using Parameters
+# using ArgCheck
 using RData
 # using DrWatson
 using CSV
@@ -12,18 +13,22 @@ using OrderedCollections
 using Dates
 using StatsBase
 using StatsFuns
+using Base:@kwdef
 using Base.Threads# using FillArrays
 # using KernelFunctions
 using Random
 using StatsPlots
 using LaTeXStrings
 
-using AbstractGPs
-using KernelFunctions
-using TemporalGPs
-using StaticArrays
-using QuadGK
+# using AbstractGPs
+# using KernelFunctions
+# using TemporalGPs
+# using StaticArrays
+# using QuadGK
 # using
+# abstract type ObservationModel end
+abstract type ObservationInit end
+abstract type ObservationsModel end
 
 using ..CovidSurvey#: NegativeBinomial2
 
