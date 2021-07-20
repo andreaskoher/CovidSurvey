@@ -3,8 +3,8 @@ module Regional
 using DrWatson
 using Turing
 using StatsBase
-using ArgCheck
-using RData
+# using ArgCheck
+# using RData
 # using DrWatson
 using CSV
 using DataFrames
@@ -18,7 +18,7 @@ using Random
 using StatsPlots
 using LaTeXStrings
 
-using QuadGK
+# using QuadGK
 # using
 
 using ..CovidSurvey#: NegativeBinomial2

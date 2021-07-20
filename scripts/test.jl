@@ -56,7 +56,6 @@ Random.seed!(ps.seed);
 data = National.load_data(;
     observations_end  = ps.observ,
     predictors        = ps.preds |> CovidSurvey.parse_predictors,
-    cases_start       = ps.cases,
     rw_step           = 1,
     epidemic_start    = 30,
     num_impute        = 6,
@@ -74,7 +73,6 @@ turing_data = data.turing_data;
 #----------------------------------------------------------------------------
 # sample model
 model = name2model[ps.model]
-model = National.model_cases
 m = model(turing_data, false)
 Turing.emptyrdcache()
 m()
@@ -98,11 +96,10 @@ safesave(fname_diagnostics, diagnostics)
 m_pred = model(turing_data, true)
 gq = Turing.generated_quantities(m_pred, chain)
 generated_posterior = vectup2tupvec( reshape(gq, length(gq)) );
-# generated_posterior = Regional.posterior(model, turing_data, chain)
 #---------------------------------------------------------------------------
 # plot results
 plotlyjs()
-p = National.plot(data, generated_posterior)
+p = National.plot(data, generated_posterior);
 savefig(p, "/home/and/tmp/figures/"*fname*".html")
 # savefig(p, projectdir("figures/tmp", fname*".png") )
 run(`firefox $("/home/and/tmp/figures/"*fname*".html")`, wait=false)
