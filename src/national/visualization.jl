@@ -16,12 +16,12 @@ struct ObservationsPlottingRecipe{Tsd, Ted, To, Te, Tl} <: PlottingRecipe
 end
 
 function expected(data, gp, label)
-    @assert label in ["cases", "hospit", "deaths"]
+    @assert label in ["cases", "hospitalizations", "deaths"]
     dates  = data.dates
     if label == "cases"
         values = gp.expected_daily_cases
         return (; dates, values )
-    elseif label == "hospit"
+    elseif label == "hospitalizations"
         values = gp.expected_daily_hospit
         return (; dates, values )
     else
@@ -31,12 +31,12 @@ function expected(data, gp, label)
 end
 
 function observed(data, label)
-    @assert label in ["cases", "hospit", "deaths"]
+    @assert label in ["cases", "hospitalizations", "deaths"]
     dates  = data.hospit.date
     if label == "cases"
         values = data.cases.country
         return (; dates, values )
-    elseif label == "hospit"
+    elseif label == "hospitalizations"
         values = data.hospit.country
         return (; dates, values )
     else
@@ -46,10 +46,10 @@ function observed(data, label)
 end
 
 function startdate(data::National.Data, label::String)
-    @assert label in ["cases", "hospit", "deaths"]
+    @assert label in ["cases", "hospitalizations", "deaths"]
     s = if label == "cases"
         data.turing_data.casemodel.start
-    elseif label == "hospit"
+    elseif label == "hospitalizations"
         data.turing_data.hospitmodel.start
     else
         data.turing_data.deathmodel.start
@@ -58,10 +58,10 @@ function startdate(data::National.Data, label::String)
 end
 
 function enddate(data::National.Data, label::String)
-    @assert label in ["cases", "hospit", "deaths"]
+    @assert label in ["cases", "hospitalizations", "deaths"]
     s = if label == "cases"
         data.turing_data.casemodel.stop
-    elseif label == "hospit"
+    elseif label == "hospitalizations"
         data.turing_data.hospitmodel.stop
     else
         data.turing_data.deathmodel.stop
@@ -92,19 +92,20 @@ end
 # ============================================================================
 # reproduction number
 
-struct RtPlottingRecipe{Tlo, Ted, Te} <: National.PlottingRecipe
+struct RtPlottingRecipe{Tlo, Ted, Te, Tl} <: National.PlottingRecipe
     lockdown  ::Tlo
     enddates  ::Ted
     expected  ::Te
+    label     ::Tl
 end
 
-function RtPlottingRecipe(data::National.Data, generated_posterior, args...)
+function RtPlottingRecipe(data::National.Data, gp, label)
     dates      = data.dates
-    values     = generated_posterior.Rt
+    values     = label == "reproduction number" ? gp.Rt : gp.effective_Rt
     expected   = (; dates, values )
     lockdown   = Date(data.lockdown)
     enddates   = Date(data.observations_end)
-    RtPlottingRecipe( lockdown, enddates, expected)
+    RtPlottingRecipe( lockdown, enddates, expected, label)
 end
 
 function Plots.plot!(p::Plots.Plot, r::RtPlottingRecipe)
@@ -114,9 +115,35 @@ function Plots.plot!(p::Plots.Plot, r::RtPlottingRecipe)
 
     vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
     vline!(p, [lo], lab="lockdown", lw=2, lc=:black, hover="$lo", ls=:dash)
-    plot_confidence_timeseries!(p, e.dates, e.values; label = "reproduction number") #Dict(hover=>strdates)
+    plot_confidence_timeseries!(p, e.dates, e.values; r.label) #Dict(hover=>strdates)
+end
+# ============================================================================
+# infection ascertainment rate
+
+struct IARPlottingRecipe{Tso, Ted, Te} <: National.PlottingRecipe
+    startdate ::Tso
+    enddates  ::Ted
+    expected  ::Te
 end
 
+function IARPlottingRecipe(data::National.Data, generated_posterior, args...)
+    dates      = data.dates
+    values     = generated_posterior.iar
+    expected   = (; dates, values )
+    startdate  = dates[ data.turing_data.iar_start_idx ]
+    enddate    = Date(data.observations_end)
+    IARPlottingRecipe( startdate, enddate, expected)
+end
+
+function Plots.plot!(p::Plots.Plot, r::IARPlottingRecipe)
+    e  = r.expected
+    ed = r.enddates
+    sd = r.startdate
+
+    vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+    vline!(p, [sd], lab="start case observations", lw=2, lc=:black, hover="$sd", ls=:dash)
+    plot_confidence_timeseries!(p, e.dates, e.values; label = "infections ascertainment rate") #Dict(hover=>strdates)
+end
 # ============================================================================
 # region plot
 
@@ -129,14 +156,18 @@ posterior2recipe = OrderedDict(
     :expected_daily_cases  => National.ObservationsPlottingRecipe,
     :expected_daily_hospit => National.ObservationsPlottingRecipe,
     :expected_daily_deaths => National.ObservationsPlottingRecipe,
-    :Rt                    => National.RtPlottingRecipe
+    :Rt                    => National.RtPlottingRecipe,
+    :iar                   => National.IARPlottingRecipe,
+    :effective_Rt          => National.RtPlottingRecipe,
 )
 
 posterior2label = OrderedDict(
     :expected_daily_cases  => "cases",
     :expected_daily_hospit => "hospitalizations",
     :expected_daily_deaths => "deaths",
-    :Rt                    => "reproduction number"
+    :Rt                    => "reproduction number",
+    :iar                   => "infections ascertainment rate",
+    :effective_Rt          => "effective reproduction number"
 )
 
 function OverviewPlottingRecipe(data::National.Data, generated_posterior)
@@ -162,7 +193,7 @@ function Plots.plot(r::OverviewPlottingRecipe)
         plot!(p, recipe)
         push!(plots, p)
     end
-    plot(plots..., layout=(nplots,1), size=(1000, nplots*250), sharex=true, link=:x)
+    plot(plots..., layout=(nplots,1), size=(1500, nplots*250), sharex=true, link=:x)
 end
 
 Plots.plot(data::National.Data, generated_posterior) =
