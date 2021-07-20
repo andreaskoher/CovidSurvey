@@ -20,20 +20,39 @@ end
 
 # ============================================================================
 # random walk model
-function random_walks!(Rt, θ, predict, latent_Rt, R0)
-	@unpack rt_step_indices, lockdown_index, num_observations, link = θ
+function random_walks!(Rt, θ, predict, latent_Rt, R0, σ_rt)
+	@unpack lockdown_index, num_observations, link = θ #rt_step_indices
 
 	Rt[1:lockdown_index] .= R0
-	Rt[lockdown_index+1:num_observations] = link.(latent_Rt[rt_step_indices])
+	Rt[lockdown_index+1:num_observations] = link.(latent_Rt) #rt_step_indices
 	if predict
-		Rt[num_observations+1:end] .= Rt[num_observations]
+		@unpack num_total_days, invlink = θ
+		n  = num_total_days - num_observations
+		rw = RandomWalk(n, σ_rt, invlink(Rt[num_observations]))
+		Rt[num_observations+1:end] = link.( rand( rw ) )
 	end
 	return nothing
 end
 
 # ============================================================================
+# time varying ascertainment rate
+
+function iar!(iar, θ, predict, latent_iar, iar0, σ_iar)
+	@unpack iar_start_idx, num_observations, casemodel = θ
+	iar[1:iar_start_idx-1] .= iar0
+	iar[iar_start_idx:num_observations] = logistic.( latent_iar )
+
+	if predict
+		@unpack num_total_days = θ
+		n  = num_total_days - num_observations
+		rw = RandomWalk(n, σ_iar, logit(iar[num_observations]))
+		iar[num_observations+1:end] = logistic.( rand( rw ) )
+	end
+	return nothing
+end
+# ============================================================================
 # infection model
-function infections!(newly_infected, cumulative_infected, effective_Rt, θ, τ, y, Rt)
+function infections!(newly_infected, cumulative_infected, effective_Rt, θ, y, Rt)
 	initepidemic!(newly_infected, cumulative_infected, effective_Rt, θ, Rt, y)
 	runepidemic!(newly_infected, cumulative_infected, effective_Rt, θ, Rt)
 end
@@ -88,8 +107,8 @@ infectious(t, newly_infected, i2o, stop) =
 _expected!(expected, t, α, args...) =
 	@inbounds expected[t] = α * infectious(t, args...)
 
-function expected!(expected, obsmodel::SimpleObsModel, newly_infected)
-	@unpack θ, μ, α = obsmodel
+function expected!(obsmodel::SimpleObsModel, newly_infected)
+	@unpack θ, μ, α, expected = obsmodel
 	@unpack delay_length = θ
 
 	i2o = inf2obs(θ, μ)
@@ -97,16 +116,21 @@ function expected!(expected, obsmodel::SimpleObsModel, newly_infected)
 
 	@inbounds expected[1] = 1e-15 * newly_infected[1]
 	for t = 2:delay_length+1
-		_expected!(expected, t, α, newly_infected, i2o, 1)
+		ᾱ = selectvalue(α, t)
+		_expected!(expected, t, ᾱ, newly_infected, i2o, 1)
 	end
 	for t = delay_length+2:num_time_step
-		_expected!(expected, t, α, newly_infected, i2o, t-delay_length)
+		ᾱ = selectvalue(α, t)
+		_expected!(expected, t, ᾱ, newly_infected, i2o, t-delay_length)
 	end
 	return nothing
 end
 
-function expected!(expected, obsmodel::WeekdayHolidayObsModel, newly_infected)
-	@unpack θ, μ, α, holidayeffect, weekdayeffect = obsmodel
+selectvalue(x::Number, i) = x
+selectvalue(x::Vector, i) = x[i]
+
+function expected!(obsmodel::WeekdayHolidayObsModel, newly_infected)
+	@unpack θ, μ, α, expected, holidayeffect, weekdayeffect = obsmodel
 	@unpack delay_length, holiday, weekday = θ
 
 	i2o = inf2obs(θ, μ)
@@ -114,12 +138,14 @@ function expected!(expected, obsmodel::WeekdayHolidayObsModel, newly_infected)
 
 	@inbounds expected[1] = 1e-15 * newly_infected[1]
 	for t = 2:delay_length+1
+		ᾱ = selectvalue(α, t)
 		weekday_holiday_effect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
-		_expected!(expected, t, α * weekday_holiday_effect, newly_infected, i2o, 1)
+		_expected!(expected, t, ᾱ * weekday_holiday_effect, newly_infected, i2o, 1)
 	end
 	for t = delay_length+2:num_time_step
+		ᾱ = selectvalue(α, t)
 		weekday_holiday_effect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
-		_expected!(expected, t, α, newly_infected, i2o, t-delay_length)
+		_expected!(expected, t, ᾱ * weekday_holiday_effect, newly_infected, i2o, t-delay_length)
 	end
 	return nothing
 end
@@ -169,7 +195,6 @@ end
 # ==============================================================================
 include("models/parametric_model.jl")
 include("models/random-walk-models.jl")
-
 ## =============================================================================
 #                      model_constant_iar_contacts
 # ==============================================================================
