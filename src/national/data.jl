@@ -467,19 +467,6 @@ function readcovariates(; fname=nothing, shift=0, startdate=nothing, enddate=not
 end
 
 country(df) = DataFrame(:date=>df.date, :country=>df.country)
-function get_iar_idx(num_tot, num_obs, start_idx, iar_step)
-    iar_idx = zeros(Int64, num_tot)
-    iar_idx[1:start_idx-1] .= 1
-    idx = 2
-    for (j,i) in enumerate(start_idx:num_obs)
-         iar_idx[i] = idx
-         j % iar_step == 0 && (idx += 1)
-    end
-    if num_obs < num_tot
-        iar_idx[num_obs+1:num_tot] .= iar_idx[num_obs]
-    end
-    iar_idx
-end
 
 function holiday(dates)
     specialdays = [Date("2020-12-24"), Date("2020-12-25"), Date("2020-12-31"), Date("2021-01-01")]
@@ -496,7 +483,6 @@ function observables!(turing_data,
     turing_data["cases"] = CSV.File( fname_cases ) |>
         DataFrame |> process_ssi |> country
 
-
     turing_data["hospit"] = CSV.File( fname_hospit ) |>
         DataFrame |> process_ssi |> country
 
@@ -508,7 +494,8 @@ end
 
 function consistent!(data; epidemic_start = 30)
     @unpack cases, hospit, deaths = data
-    s = data["startdate"] = startdate(deaths; epidemic_start)
+    data["epidemic_start"] = epidemic_start
+    s = data["startdate"]  = startdate(deaths; epidemic_start)
     e = enddate(deaths, cases, hospit)
     data["deaths"] = limit(deaths, s, e)
     data["hospit"] = limit(hospit, s, e)
@@ -557,29 +544,29 @@ function turingformat!(data, observations_end = nothing)
     return nothing
 end
 
-function cases_start_date!(data, cases_start)
-    @unpack dates_turing, num_obs = data
-    if isnothing(cases_start)
-        data["num_case_obs"] = 0
-        data["cases_start_idx"] = nothing
-    else
-        data["cases_start_idx"] = i = findfirst(==(Date.(cases_start)), dates_turing)
-        data["num_case_obs"] = num_obs - i + 1
-    end
-    return nothing
-end
+# function cases_start_date!(data, cases_start)
+#     @unpack dates_turing, num_obs = data
+#     if isnothing(cases_start)
+#         data["num_case_obs"] = 0
+#         data["cases_start_idx"] = nothing
+#     else
+#         data["cases_start_idx"] = i = findfirst(==(Date.(cases_start)), dates_turing)
+#         data["num_case_obs"] = num_obs - i + 1
+#     end
+#     return nothing
+# end
 
 function covariates!(data, predictors; covariates_kwargs...)
     @unpack dates_turing, num_obs = data
     isnothing(predictors) && return
-    covariates = readcovariates(; covariates_kwargs... )
-    covariates = leftjoin(DataFrame(:date=>dates_turing), covariates, on=:date)
+    covariates       = readcovariates(; covariates_kwargs... )
+    covariates       = leftjoin(DataFrame(:date=>dates_turing), covariates, on=:date)
     sort!(covariates, :date)
     covariates_start = findfirst(x->!ismissing(x), covariates[:,Not(:date)][:,1])
-    covariates = covariates[covariates_start:num_obs,:]
-    covariates = select_predictors(covariates, predictors) #num_obs+shift_covariates, num_tot
-    covariates = convert(Array{Float64,2}, covariates)
-    data["covariates"] = covariates
+    covariates       = covariates[covariates_start:num_obs,:]
+    covariates       = select_predictors(covariates, predictors) #num_obs+shift_covariates, num_tot
+    covariates       = convert(Array{Float64,2}, covariates)
+    data["covariates"]       = covariates
     data["covariates_start"] = covariates_start
     return nothing
 end
@@ -610,6 +597,16 @@ function randomwalk!(data, stepsize=1)
     return nothing
 end
 
+function time_varying_iar!(data, casemodel, iar_step=1)
+    @unpack num_obs, num_tot = data
+    data["iar_start_idx"] = startindex(data, casemodel)
+    data["num_iar_steps"] = num_obs - data["iar_start_idx"] + 1
+    # data["iar_idx"] = idx = stepindex(n, stepsize)
+    # data["num_iar_steps"] = length(unique(idx[1:num_obs]))
+    # iar_idx = get_iar_idx(num_tot, num_obs, cases_start_idx, iar_step)
+    # num_iar_steps = length(unique(iar_idx))
+    return nothing
+end
 # ============================================================================
 # observation model defaults
 @kwdef struct CaseInit <: ObservationInit
@@ -656,7 +653,9 @@ end
 function startindex(data, o)
     dates   = data["dates_turing"]
     if isempty(o.obs_start)
-        return 1
+        date = Date(data["startdate"]) + Day(data["epidemic_start"])
+        i = findfirst(==(date), dates)
+        return i
     else
         date = Date(o.obs_start)
         i = findfirst(==(date), dates)
@@ -714,12 +713,9 @@ observations(data, ::DeathInit)  = data["deaths_turing"]
 # end
 #
 
-
-
 function load_data(;
     observations_end  = nothing,
     predictors        = nothing,
-    cases_start       = nothing,
     rw_step           = 1,
     iar_step          = 1,
     epidemic_start    = 30,
@@ -742,16 +738,16 @@ function load_data(;
     observables!(data)
     consistent!(data; epidemic_start)
     turingformat!(data, observations_end)
-    cases_start_date!(data, cases_start)
+    # cases_start_date!(data, cases_start)
     covariates!(data, predictors; covariates_kwargs...)
     lockdown!(data, lockdown)
     seroprev!(data)
     randomwalk!(data, rw_step)
+    time_varying_iar!(data, casemodel, iar_step)
     ObservParams!(data, casemodel)
     ObservParams!(data, hospitmodel)
     ObservParams!(data, deathmodel)
-    # iar_idx = get_iar_idx(num_tot, num_obs, cases_start_idx, iar_step)
-    # num_iar_steps = length(unique(iar_idx))
+
 
     # dk = begin
     #     update && run(`Rscript $(datadir())/COVID19.R`)
@@ -772,9 +768,11 @@ function load_data(;
         num_si                      = 15,
         lockdown_index              = data["lockdown_index"],
         hospitmodel                 = data["hospitmodel"],
-        hospits                     = data["hospit_turing"],
+        hospit                      = data["hospit_turing"],
         num_rt_steps                = data["num_rt_steps"],
         rt_step_indices             = data["rt_step_index"],
+        iar_start_idx               = data["iar_start_idx"],
+        num_iar_steps               = data["num_iar_steps"],
         num_observations            = data["num_obs"],
         link                        = link,
         invlink                     = invlink,
@@ -797,7 +795,7 @@ function load_data(;
         data["seroprev"],
         lockdown,
         observations_end,
-        cases_start,
+        -1,
         data["startdate"]
     )
 end
