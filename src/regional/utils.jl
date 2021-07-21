@@ -33,7 +33,6 @@ function infections!(newly_infecteds, cumulative_infecteds, θ, τ, ys, Rts)
 		initepidemic!(newly_infecteds[m], cumulative_infecteds[m], θ, regionaldata)
 		runepidemic!(newly_infecteds[m], cumulative_infecteds[m], θ, regionaldata)
 	end
-	return nothing
 end
 
 function initepidemic!(newly_infected, cumulative_infected, effective_Rt, θ, regionaldata)
@@ -79,7 +78,6 @@ function runepidemic!(newly_infected, cumulative_infected, effective_Rts, θ, re
 		# number of new infections (unobserved)
 		newly_infected[t] = effective_Rt[t] * effectively_infectious
 	end
-	return nothing
 end
 
 function runepidemic!(newly_infected, cumulative_infected, θ, regionaldata)
@@ -148,6 +146,45 @@ function observe_hospitalizations(θ, expected_daily_hospits, ϕ_h)
 	end
 	return ℓ
 end
+
+# QUESTION : use general observation model as in national approach?
+# function expected!(obsmodel::SimpleObsModel, newly_infecteds)
+# 	@unpack θ, μ, α, expecteds = obsmodel
+# 	@unpack num_regions, delay_length = θ
+#
+# 	i2o = inf2obs(θ, μ)
+#
+# 	for m in 1:num_regions
+#
+# 		expected       = expecteds[m]
+# 		newly_infected = newly_infecteds[m]
+# 		num_time_step  = length(expected)
+#
+# 		@inbounds expected[1] = 1e-15 * newly_infected[1]
+# 		for t = 2:delay_length+1
+# 			ᾱ = selectvalue(α, t)
+# 			_expected!(expected, t, ᾱ, newly_infected, i2o, 1)
+# 		end
+# 		for t = delay_length+2:num_time_step
+# 			ᾱ = selectvalue(α, t)
+# 			_expected!(expected, t, ᾱ, newly_infected, i2o, t-delay_length)
+# 		end
+# 	end
+# end
+#
+# function inf2obs(param, μ)
+# 	@unpack delay_dispersion, delay_length, delay_dist = param
+# 	i2o = pdf.( Ref(delay_dist(μ, delay_dispersion)), 1:delay_length )
+# 	i2o /= sum(i2o)
+# 	return i2o
+# end
+#
+# _expected!(expected, t, α, args...) =
+# @inbounds expected[t] = α * infectious(t, args...)
+#
+# infectious(t, newly_infected, i2o, stop) =
+#     sum(newly_infected[τ] * i2o[t - τ] for τ = (t - 1):-1:stop)
+
 
 # ============================================================================
 # post-processing
