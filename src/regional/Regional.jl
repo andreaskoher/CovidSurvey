@@ -4,7 +4,7 @@ using DrWatson
 using Turing
 using StatsBase
 # using ArgCheck
-using RData
+# using RData
 # using DrWatson
 using CSV
 using DataFrames

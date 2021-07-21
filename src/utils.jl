@@ -1,3 +1,43 @@
+# ==============================================================================
+
+struct RandomWalk{Tn, Ts, Tx} <: ContinuousMultivariateDistribution
+    n::Tn
+    s::Ts
+    x0::Tx
+end
+
+Distributions.rand(rng::AbstractRNG, d::RandomWalk{Tn, Ts, Tx}) where {Tn, Ts, Tx} = begin
+    x = Vector{Tx}(undef, d.n)
+    Distributions._rand!(rng, x, d)
+    return x
+end
+
+Distributions._rand!(rng::AbstractRNG, x::AbstractVector, d::RandomWalk) = begin
+	x[1] = rand(Normal(d.x0, d.s))
+	for i in 2:d.n
+		x[i] = rand(Normal(x[i-1], d.s))
+	end
+	return nothing
+end
+
+Distributions.logpdf(
+    d::RandomWalk{Tn, Ts, Tx}, x::AbstractVector{T}
+) where {Tn, Ts, Tx, T} = begin
+	ℓ  = logpdf( Normal(d.x0, d.s), first(x) )
+	ℓ += logpdf( MvNormal( d.n-1, d.s ), diff(x) )
+	return ℓ
+end
+
+Bijectors.bijector(d::RandomWalk) = Bijectors.Identity{1}()
+
+Bijectors.bijector(
+    ::DistributionsAD.VectorOfMultivariate{Continuous, RandomWalk{Tn, Ts, Tx}, Vector{RandomWalk{Tn, Ts, Tx}}}
+) where {Tn, Ts, Tx} = Bijectors.Identity{2}()
+
+
+Base.length(d::RandomWalk) = d.n
+
+# ==============================================================================
 """
 Mean standard deviation parametrization:
 
@@ -44,6 +84,7 @@ Hence, the resulting map is `(μ, ϕ) ↦ NegativeBinomial(ϕ, 1 / (1 + μ / ϕ)
 function NegativeBinomial2(μ, ϕ)
     p = 1 / (1 + μ / ϕ)
     r = ϕ
+	# !(0 < p <= 1) && (@show "$μ $ϕ")
     return NegativeBinomial(r, p)
 end
 
@@ -293,4 +334,13 @@ function parseparams(s)
         ps[key] = parseval(sval)
     end
     (; ps...)
+end
+
+function firefox(p)
+    dir = normpath(homedir(), ".tmp")
+    mkpath(dir)
+    fname = normpath(dir, "tmp.html")
+    savefig(p, fname)
+    run(`firefox $(fname)`, wait=false)
+    return nothing
 end

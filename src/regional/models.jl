@@ -1,3 +1,4 @@
+using ..CovidSurvey: RandomWalk
 ## ============================================================
 @model function model_hospit(
     θ,     # [Bool] if `false`, will only compute what's needed to `observe` but not more
@@ -22,7 +23,7 @@
 	random_walks!(Rts, θ, predict, latent_Rts, R0s)
 
 	############ 3.) infection dynamics
-	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
+	τ  ~ Exponential(1 / 0.02) # `Exponential` has inverse parameterization of the one in Stan
 	T  = typeof(τ)
 	ys ~ filldist(truncated(Exponential(τ),T(0),T(1000)), num_regions)
 
@@ -34,7 +35,7 @@
 	# infections!(newly_infecteds, cumulative_infecteds, effective_Rts, θ, τ, ys, Rts)
 	########### 4.) derive observables
     μ_i2h ~ truncated(Normal(12., 1.), 9, 16)
-	ihr   ~ truncated(Normal(1.8/100,0.5/100),1/100,5/100)
+	ihr   ~ truncated(Normal(1.8/100,0.5/100),.1/100,5/100)
 
 	expected_daily_hospits = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
 
@@ -45,7 +46,7 @@
 	ϕ_h   ~ truncated(Normal(50, 10), 20, Inf)
 
 	ℓ  = zero(V)
-	ℓ += observe_hospitalizations(ℓ, θ, expected_daily_hospits, ϕ_h)
+	ℓ += observe_hospitalizations(θ, expected_daily_hospits, ϕ_h)
 
 	Turing.@addlogprob! ℓ
 

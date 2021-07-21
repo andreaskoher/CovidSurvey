@@ -134,10 +134,10 @@ end
 #-----------------------------------------------------------------------------
 # save chain
 chain = let
-    chain[ps.warmup+1:end,:,:]
+    chain = chain[ps.warmup+1:end,:,:]
+    chain = chain[1:10:end,:,:]
     fname = normpath( fdir, savename(ps.prefix*"CHAIN", ps, "jls") )
     safesave( fname, chain )
-    chain[1:10:end,:,:]
 end
 #-----------------------------------------------------------------------------
 @info "make predictions"
@@ -152,21 +152,24 @@ end
 for r in Regional.regions
     recipe = Regional.RegionPlottingRecipe(data, generated_posterior, r)
     p = plot(recipe)
-    savefig( p, savename(ps.prefix*"FIG-$(uppercase(r))", ps, "html") )
+    fname = normpath( fdir, savename(ps.prefix*"FIG-$(uppercase(r))", ps, "html") )
+    savefig( p, fname )
 end
 ##
 @info "plot rt"
 let
     recipe = Regional.RtsPlottingRecipe(data, generated_posterior)
     p = plot(recipe)
-    savefig( p, savename(ps.prefix*"FIG-RT", ps, "html") )
+    fname = normpath( fdir, savename(ps.prefix*"FIG-RT", ps, "html") )
+    savefig( p, fname )
 end
 ##
 @info "plot hospitalizations"
 let
     recipe = Regional.HospitsPlottingRecipe(data, generated_posterior)
     p = plot(recipe)
-    savefig( p, savename(ps.prefix*"FIG-HOSPIT", ps, "html") )
+    fname = normpath( fdir, savename(ps.prefix*"FIG-HOSPIT", ps, "html") )
+    savefig( p, fname )
 end
 
 #-----------------------------------------------------------------------------

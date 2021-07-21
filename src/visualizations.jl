@@ -16,12 +16,12 @@ function plot_confidence_timeseries!(p::Plots.AbstractPlot, data::AbstractMatrix
 end
 
 """
-    plot_confidence_timeseries!(p::Plot, time::Vector, data::AbstractMatrix{<:Real}; label="", kwargs...)
+    plot_confidence_timeseries!(p::Plot, time::AbstractVector, data::AbstractMatrix{<:Real}; label="", kwargs...)
 
 Plots confidence intervals for the time-series represented by `data` and a vector of Dates.
 Assumes each row corresponds to the samples for a single time-step.
 """
-function plot_confidence_timeseries!(p::Plots.AbstractPlot, time::Vector{<:Dates.TimeType}, data::AbstractMatrix; no_label = false, label="", kwargs...)
+function plot_confidence_timeseries!(p::Plots.AbstractPlot, time::AbstractVector{<:Dates.TimeType}, data::AbstractMatrix; no_label = false, label="", kwargs...)
     intervals = [0.025, 0.25, 0.5, 0.75, 0.975]
 
     qs = [quantile(v, intervals) for v in eachrow(data)]
@@ -47,17 +47,17 @@ plot_confidence_timeseries(data::AbstractMatrix{<:Real}; kwargs...) = plot_confi
 See `plot_confidence_timeseries!`.
 """
 plot_confidence_timeseries(
-    time::Vector{<:Dates.TimeType},
+    time::AbstractVector{<:Dates.TimeType},
     data::AbstractVector{T} where T <: AbstractVector;
     kwargs...
 ) = plot_confidence_timeseries!(plot(), time, hcat(data...); kwargs...)
 plot_confidence_timeseries!(
     p   ::Plots.AbstractPlot,
-    time::Vector{<:Dates.TimeType},
+    time::AbstractVector{<:Dates.TimeType},
     data::AbstractVector{T} where T <: AbstractVector;
     kwargs...
 ) = plot_confidence_timeseries!(p, time, hcat(data...); kwargs...)
 plot_confidence_timeseries(
-      time::Vector{<:Dates.TimeType}
+      time::AbstractVector{<:Dates.TimeType}
     , data::AbstractMatrix{<:Real}; kwargs...
 ) = plot_confidence_timeseries!(plot(), time, data; kwargs...)

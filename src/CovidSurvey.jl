@@ -6,7 +6,9 @@ using Distributions
 using Plots
 using StatsBase
 using Dates
-
+using DistributionsAD
+using Random: AbstractRNG
+import Bijectors
 
 export
     National,
