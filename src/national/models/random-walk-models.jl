@@ -10,7 +10,7 @@
     num_time_steps   = predict ? num_total_days : num_observations
 	############# 1.) time varying reproduction number
 
-	R0         ~ truncated(Normal(3., 1.), 1., 5.)
+	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
 	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
@@ -31,7 +31,7 @@
 	############ 3.) infection dynamics
 	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
 	T  = typeof(τ)
-	y  ~ truncated(Exponential(τ),T(0),T(1000))
+	y  ~ truncated(Exponential(τ),T(1),T(1000))
 
 	newly_infected       = TV(undef, num_time_steps)
 	cumulative_infected  = TV(undef, num_time_steps)
@@ -113,7 +113,7 @@ end
     num_time_steps   = predict ? num_total_days : num_observations
 	############# 1.) time varying reproduction number
 
-	R0         ~ truncated(Normal(3., 1.), 1., 5.)
+	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
 	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
@@ -134,7 +134,7 @@ end
 	############ 3.) infection dynamics
 	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
 	T  = typeof(τ)
-	y  ~ truncated(Exponential(τ),T(0),T(1000))
+	y  ~ truncated(Exponential(τ),T(1),T(1000))
 
 	newly_infected       = TV(undef, num_time_steps)
 	cumulative_infected  = TV(undef, num_time_steps)
@@ -222,7 +222,7 @@ end
 	num_time_steps_2 = predict ? num_total_days : deathmodel.stop
 	############# 2.) time varying reproduction number
 
-	R0         ~ truncated(Normal(3., 1.), 1., 5.)
+	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
 	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
@@ -234,7 +234,7 @@ end
 	############ 3.) infection dynamics
 	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
 	T  = typeof(τ)
-	y  ~ truncated(Exponential(τ),T(0),T(1000))
+	y  ~ truncated(Exponential(τ),T(1),T(1000))
 
 	newly_infected       = TV(undef, num_time_steps)
 	cumulative_infected  = TV(undef, num_time_steps)
@@ -305,7 +305,7 @@ end
     num_time_steps = predict ? num_total_days : num_observations
 
 	############# 2.) time varying reproduction number
-	R0         ~ truncated(Normal(3., 1.), 1., 5.)
+	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
 	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
@@ -317,7 +317,7 @@ end
 	############ 3.) infection dynamics
 	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
 	T  = typeof(τ)
-	y  ~ truncated(Exponential(τ),T(0),T(1000))
+	y  ~ truncated(Exponential(τ),T(1),T(1000))
 
 	newly_infected       = TV(undef, num_time_steps)
 	cumulative_infected  = TV(undef, num_time_steps)
@@ -365,7 +365,7 @@ end
     num_time_steps = predict ? num_total_days : num_observations
 
 	############# 2.) time varying reproduction number
-	R0         ~ truncated(Normal(3., 1.), 1., 5.)
+	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
 	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
@@ -377,7 +377,7 @@ end
 	############ 3.) infection dynamics
 	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
 	T  = typeof(τ)
-	y  ~ truncated(Exponential(τ),T(0),T(1000))
+	y  ~ truncated(Exponential(τ),T(1),T(1000))
 
 	newly_infected       = TV(undef, num_time_steps)
 	cumulative_infected  = TV(undef, num_time_steps)
