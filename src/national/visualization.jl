@@ -90,6 +90,35 @@ function Plots.plot!(p::Plots.Plot, r::ObservationsPlottingRecipe)
 end
 
 # ============================================================================
+# seropos
+
+struct SeroPlottingRecipe{E, O, L} <: National.PlottingRecipe
+    expected  ::E
+    observed  ::O
+    label     ::L
+end
+
+function SeroPlottingRecipe(data::National.Data, gp, label)
+    @unpack dates, mean, std = data.turing_data.seromodel
+    observed   = (; dates, mean, std )
+    expected = let
+        values = gp.expected_seropos
+        dates  = data.dates
+        (; dates, values)
+    end
+    SeroPlottingRecipe( expected, observed, label)
+end
+
+function Plots.plot!(p::Plots.Plot, r::SeroPlottingRecipe)
+    e = r.expected
+    o = r.observed
+
+    plot_confidence_timeseries!(p, e.dates, e.values / population * 100; r.label)
+    y  = o.mean * 100 / population
+    ye = o.std * 100 / population
+    scatter!(p, o.dates, y, yerror=ye, hover=["$d: $val" for (d, val) in zip(o.dates, y)])
+end
+# ============================================================================
 # reproduction number
 
 struct RtPlottingRecipe{Tlo, Ted, Te, Tl} <: National.PlottingRecipe
@@ -159,6 +188,7 @@ posterior2recipe = OrderedDict(
     :Rt                    => National.RtPlottingRecipe,
     :iar                   => National.IARPlottingRecipe,
     :effective_Rt          => National.RtPlottingRecipe,
+    :expected_seropos      => National.SeroPlottingRecipe,
 )
 
 posterior2label = OrderedDict(
@@ -167,7 +197,8 @@ posterior2label = OrderedDict(
     :expected_daily_deaths => "deaths",
     :Rt                    => "reproduction number",
     :iar                   => "infections ascertainment rate",
-    :effective_Rt          => "effective reproduction number"
+    :effective_Rt          => "effective reproduction number",
+    :expected_seropos      => "sero positive"
 )
 
 function OverviewPlottingRecipe(data::National.Data, generated_posterior)

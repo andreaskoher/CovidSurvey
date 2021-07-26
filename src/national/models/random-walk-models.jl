@@ -12,7 +12,7 @@
 
 	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
-	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
+	σ_rt       ~ truncated(Normal(0.1, .05), 0, .2)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
 
 	Rt = TV(undef, num_time_steps)
@@ -40,7 +40,7 @@
 	# infections!(newly_infected, cumulative_infected, θ, τ, y, Rt)
 	infections!(newly_infected, cumulative_infected, effective_Rt, θ, y, Rt)
 	########### 4.) derive observables
-	μ_i2d ~ truncated(Normal(20., 4.), 10, 30)
+	μ_i2d ~ truncated(Normal(20., 2.), 17, 25)
 	μ_i2c ~ truncated(Normal(4.5, 1.), 3, 7)
 	ifr   ~ truncated(Normal(6/1000, 3/1000), 2/1000, 10/1000)
 	# ihr   ~ truncated(Normal(1/100,1/100),.1/100,5/100)
@@ -58,7 +58,7 @@
 	expected_daily_cases  = TV(undef, num_time_steps)
 
 	ϕ_c  ~ truncated(Normal(50, 10), 30, Inf)
-	ϕ_d  ~ truncated(Normal(30, 10), 5, Inf)
+	ϕ_d  ~ truncated(Normal(40, 10), 10, Inf)
 
     cases_observation_model = WeekdayHolidayObsModel(
         casemodel, μ_i2c, iar, ϕ_c, expected_daily_cases, weekdayeffect, holidayeffect
@@ -115,7 +115,7 @@ end
 
 	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
-	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
+	σ_rt       ~ truncated(Normal(0.1, .05), 0, .2)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
 
 	Rt = TV(undef, num_time_steps)
@@ -145,7 +145,7 @@ end
 	########### 4.) derive observables
 	μ_i2c ~ truncated(Normal(4.5, 1.), 3, 7)
 	μ_i2h ~ truncated(Normal(12., 3.), 9, 16)
-	μ_i2d ~ truncated(Normal(20., 4.), 10, 30)
+	μ_i2d ~ truncated(Normal(20., 2.), 17, 25)
 	ihr   ~ truncated(Normal(1/100,1/100),.1/100,5/100)
 	ifr   ~ truncated(Normal(6/1000, 3/1000), 2/1000, 10/1000)
 
@@ -163,8 +163,8 @@ end
 	expected_daily_deaths = TV(undef, num_time_steps)
 
 	ϕ_c  ~ truncated(Normal(50, 10), 30, Inf)
-	ϕ_h  ~ truncated(Normal(25, 10), 10, 60)
-	ϕ_d  ~ truncated(Normal(30, 10), 5, Inf)
+	ϕ_h  ~ truncated(Normal(50, 10), 20, Inf)
+	ϕ_d  ~ truncated(Normal(40, 10), 10, Inf)
 
     cases_observation_model = WeekdayHolidayObsModel(
         casemodel, μ_i2c, iar, ϕ_c, expected_daily_cases, weekdayeffect, holidayeffect
@@ -216,7 +216,7 @@ end
 	::Type{V}  = Float64;
 ) where {TV, V}
 
-	@unpack num_observations, num_total_days, num_rt_steps, invlink, deathmodel, casemodel = θ
+	@unpack num_observations, num_total_days, num_rt_steps, invlink, deathmodel, casemodel, seromodel, num_covariates = θ
     # If we don't want to predict the future, we only need to compute up-to time-step `num_obs_countries[m]`
     num_time_steps   = predict ? num_total_days : num_observations
 	num_time_steps_2 = predict ? num_total_days : deathmodel.stop
@@ -224,12 +224,21 @@ end
 
 	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
-	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
+	σ_rt       ~ truncated(Normal(0.1, .05), 0, .2)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
 
 	Rt = TV(undef, num_time_steps)
 
-	random_walks!(Rt, θ, predict, latent_Rt, R0, σ_rt)
+	if num_covariates > 0
+		effect ~ filldist(Exponential(0.2), num_covariates)
+		if θ.semiparametric
+			semiparametric!(Rt, θ, predict, latent_Rt, R0, σ_rt, effect)
+		else
+			mixed!(Rt, θ, predict, latent_Rt, R0, σ_rt, effect)
+		end
+	else
+		random_walks!(Rt, θ, predict, latent_Rt, R0, σ_rt)
+	end
 
 	############ 3.) infection dynamics
 	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
@@ -243,8 +252,12 @@ end
 	# infections!(newly_infected, cumulative_infected, θ, τ, y, Rt)
 	infections!(newly_infected, cumulative_infected, effective_Rt, θ, y, Rt)
 	########### 4.) derive observables
-	μ_i2d ~ truncated(Normal(20., 4.), 10, 30)
-	μ_i2c ~ truncated(Normal(4.5, 1.), 3, 7)
+	#1
+	# μ_i2d ~ truncated(Normal(20., 4.), 10, 30)
+	# μ_i2c ~ truncated(Normal(4.5, 1.), 3, 7)
+	#2
+	μ_i2d ~ truncated(Normal(20., 2.), 17, 25)
+	μ_i2c ~ truncated(Normal(2., 1.), 0, 5)
 	iar   ~ Beta(1,10)
 	ifr   ~ truncated(Normal(6/1000, 3/1000), 2/1000, 10/1000)
 	# ihr   ~ truncated(Normal(1/100,1/100),.1/100,5/100)
@@ -261,14 +274,15 @@ end
 	expected_daily_deaths = TV(undef, num_time_steps_2)
 	expected_daily_cases  = TV(undef, num_time_steps)
 
-	ϕ_c  ~ truncated(Normal(50, 10), 30, Inf)
-	ϕ_d  ~ truncated(Normal(30, 10), 5, Inf)
+	ϕ_c  ~ truncated(InverseGamma2(80, .2), 30, Inf)
+	ϕ_d  ~ truncated(Normal(40, 10), 10, Inf)
+ 	σ_s  ~ seromodel.dstd
 
     cases_observation_model = WeekdayHolidayObsModel(
         casemodel, μ_i2c, iar, ϕ_c, expected_daily_cases, weekdayeffect, holidayeffect
     )
     deaths_observation_model = SimpleObsModel(deathmodel, μ_i2d, ifr, ϕ_d, expected_daily_deaths)
-
+	sero_observation_model   = SimpleSeroObsModel(seromodel, σ_s, cumulative_infected)
 
 	expected!(cases_observation_model, newly_infected)
 	expected!(deaths_observation_model, newly_infected)
@@ -278,6 +292,7 @@ end
 	ℓ  = zero(V)
     ℓ += logpdf(cases_observation_model, θ.cases)
     ℓ += logpdf(deaths_observation_model, θ.deaths)
+	ℓ += logpdf(sero_observation_model, θ.sero)
 
 	Turing.@addlogprob! ℓ
 
@@ -286,7 +301,8 @@ end
 		expected_daily_deaths = expected_daily_deaths,
 		expected_daily_cases = expected_daily_cases,
 		Rt = Rt,
-		effective_Rt = effective_Rt
+		effective_Rt = effective_Rt,
+		expected_seropos = cumulative_infected
 	)
 end
 
@@ -300,19 +316,26 @@ end
 	::Type{V}  = Float64;
 ) where {TV, V}
 
-	@unpack num_observations, num_total_days, num_rt_steps, invlink, hospitmodel = θ
+	@unpack num_observations, num_total_days, num_rt_steps, invlink, hospitmodel, seromodel, num_covariates = θ
     # If we don't want to predict the future, we only need to compute up-to time-step `num_obs_countries[m]`
     num_time_steps = predict ? num_total_days : num_observations
 
 	############# 2.) time varying reproduction number
 	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
-	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
+	σ_rt       ~ truncated(Normal(0.1, .05), 0, .2)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
-
 	Rt = TV(undef, num_time_steps)
-
-	random_walks!(Rt, θ, predict, latent_Rt, R0, σ_rt)
+	if num_covariates > 0
+		effect ~ filldist(Exponential(0.2), num_covariates)
+		if θ.semiparametric
+			semiparametric!(Rt, θ, predict, latent_Rt, R0, σ_rt, effect)
+		else
+			mixed!(Rt, θ, predict, latent_Rt, R0, σ_rt, effect)
+		end
+	else
+		random_walks!(Rt, θ, predict, latent_Rt, R0, σ_rt)
+	end
 
 	############ 3.) infection dynamics
 	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
@@ -327,26 +350,34 @@ end
 	infections!(newly_infected, cumulative_infected, effective_Rt, θ, y, Rt)
 
 	########### 4.) derive observables
-    μ ~ truncated(Normal(12., 1.), 9, 16)
+	#1
+    # μ ~ truncated(Normal(12., 1.), 9, 16)
+	#2
+	μ ~ truncated(Normal(9., 1.), 7, 11)
 	α ~ truncated(Normal(1.8/100,0.5/100),1/100,5/100)
 	ϕ ~ truncated(Normal(50, 10), 20, Inf)
+	σ_s = seromodel.std
 
 
 	expected = TV(undef, num_time_steps)
 	hospit_observation_model = SimpleObsModel(hospitmodel, μ, α, ϕ, expected)
+	sero_observation_model   = SimpleSeroObsModel(seromodel, σ_s, cumulative_infected)
+
 	expected!(hospit_observation_model, newly_infected)
 
 	########### 4.) compare model to observations
 	## 4.1) observe hospitalizations
 	ℓ  = zero(V)
 	ℓ += logpdf(hospit_observation_model, θ.hospit)
+	ℓ += logpdf(sero_observation_model, θ.sero)
 	Turing.@addlogprob! ℓ
 
 	return (
 		newly_infected = newly_infected,
 		expected_daily_hospit = expected,
 		Rt = Rt,
-		effective_Rt = effective_Rt
+		effective_Rt = effective_Rt,
+		expected_seropos = cumulative_infected
 	)
 end
 
@@ -360,19 +391,28 @@ end
 	::Type{V}  = Float64;
 ) where {TV, V}
 
-	@unpack num_observations, num_total_days, num_rt_steps, invlink, deathmodel = θ
+	@unpack num_observations, num_total_days, num_rt_steps, invlink, deathmodel, seromodel, num_covariates = θ
     # If we don't want to predict the future, we only need to compute up-to time-step `num_obs_countries[m]`
     num_time_steps = predict ? num_total_days : num_observations
 
 	############# 2.) time varying reproduction number
 	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
-	σ_rt       ~ truncated(Normal(0.1, .05), 0, .25)
+	σ_rt       ~ truncated(Normal(0.1, .05), 0, .2)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
 
 	Rt = TV(undef, num_time_steps)
 
-	random_walks!(Rt, θ, predict, latent_Rt, R0, σ_rt)
+	if num_covariates > 0
+		effect ~ filldist(Exponential(0.2), num_covariates)
+		if θ.semiparametric
+			semiparametric!(Rt, θ, predict, latent_Rt, R0, σ_rt, effect)
+		else
+			mixed!(Rt, θ, predict, latent_Rt, R0, σ_rt, effect)
+		end
+	else
+		random_walks!(Rt, θ, predict, latent_Rt, R0, σ_rt)
+	end
 
 	############ 3.) infection dynamics
 	τ  ~ Exponential(1 / 0.03) # `Exponential` has inverse parameterization of the one in Stan
@@ -387,25 +427,28 @@ end
 	infections!(newly_infected, cumulative_infected, effective_Rt, θ, y, Rt)
 
 	########### 4.) derive observables
-	μ ~ truncated(Normal(20., 4.), 10, 30)
+	μ ~ truncated(Normal(20., 2.), 17, 25)
 	α ~ truncated(Normal(6/1000, 3/1000), 1/1000, 10/1000)
-	ϕ ~ truncated(Normal(40, 10), 0, Inf)
-
+	ϕ ~ truncated(Normal(40, 10), 10, Inf)
+	σ_s  = seromodel.std
 
 	expected = TV(undef, num_time_steps)
 	deaths_observation_model = SimpleObsModel(deathmodel, μ, α, ϕ, expected)
+	sero_observation_model   = SimpleSeroObsModel(seromodel, σ_s, cumulative_infected)
 	expected!(deaths_observation_model, newly_infected)
 
 	########### 4.) compare model to observations
 	## 4.1) observe deaths
 	ℓ  = zero(V)
 	ℓ += logpdf(deaths_observation_model, θ.deaths)
+	ℓ += logpdf(sero_observation_model, θ.sero)
 	Turing.@addlogprob! ℓ
 
 	return (
 		newly_infected = newly_infected,
 		expected_daily_deaths = expected,
 		Rt = Rt,
-		effective_Rt = effective_Rt
+		effective_Rt = effective_Rt,
+		expected_seropos = cumulative_infected
 	)
 end

@@ -18,6 +18,12 @@ struct SimpleObsModel{T,M,A,P,E} <: ObservationsModel
 	expected::E
 end
 
+struct SimpleSeroObsModel{T,S,E}# <: ObservationsModel
+    θ::T
+	σ::S
+	expected::E
+end
+
 # ============================================================================
 # random walk model
 function random_walks!(Rt, θ, predict, latent_Rt, R0, σ_rt)
@@ -28,8 +34,30 @@ function random_walks!(Rt, θ, predict, latent_Rt, R0, σ_rt)
 	if predict
 		@unpack num_total_days, invlink = θ
 		n  = num_total_days - num_observations
+		n < 1 && return nothing
 		rw = RandomWalk(n, σ_rt, invlink(Rt[num_observations]))
 		Rt[num_observations+1:end] = link.( rand( rw ) )
+	end
+	return nothing
+end
+
+# ============================================================================
+# semi-parametric model
+function semiparametric!(Rt, θ, predict, latent_Rt, R0, σ_rt, α)
+	@unpack lockdown_index, num_observations, link, covariates, covariates_start, num_total_days = θ #rt_step_indices
+
+	Rt[1:lockdown_index] .= R0
+	Rt[lockdown_index+1:covariates_start-1] = link.(latent_Rt)
+	Rt[covariates_start:num_observations]      = link.(
+        latent_Rt[end] .+ covariates * α
+    )
+	if predict
+		Rt[num_observations+1:num_total_days] .= Rt[num_observations]
+		# @unpack num_total_days, invlink = θ
+		# n  = num_total_days - num_observations
+		# n < 1 && return nothing
+		# rw = RandomWalk(n, σ_rt, invlink(Rt[num_observations]))
+		# Rt[num_observations+1:end] = link.( rand( rw ) )
 	end
 	return nothing
 end
@@ -165,7 +193,17 @@ function Turing.logpdf(obsmodel::ObservationsModel, observed)
 	return logpdf(dist, ys)
 end
 
+_unrealistic(y,ŷ) = any( ŷ .> 1.5*y )
+function Turing.logpdf(obsmodel::SimpleSeroObsModel, observed)
+	@unpack θ, σ, expected = obsmodel
+	@unpack index, delay = θ
 
+	T    = eltype(observed)
+	y    = expected[index]
+	dist = MvNormal(y, σ) # select only early observations
+	_unrealistic(y, observed) && (return T(Inf))
+	return logpdf(dist, observed)
+end
 
 # =============================================================================
 

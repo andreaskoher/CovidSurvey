@@ -40,17 +40,16 @@ name2model = Dict(
 # load data
 ps = (
     warmup = 10,
-    steps  = 20,
-    seed   = 20000,
+    steps  = 100,
+    seed   = nothing,
     observ = "2021-01-13",#"2021-02-06",#"2021-03-25"
     cases  = "2020-06-01",
-    model  = "hospit",
-    preds = nothing,
-    hospit = true,
-    sero = true,
+    model  = "cases",
+    preds = "CF,CC,CR,CS",
+    semipara=true,
 )
+!isnothing(ps.seed) && Random.seed!(ps.seed);
 fname = savename("chains", ps, "")
-Random.seed!(ps.seed);
 @info ps
 
 data = National.load_data(;
@@ -59,43 +58,19 @@ data = National.load_data(;
     rw_step           = 1,
     epidemic_start    = 30,
     num_impute        = 6,
-    deathmodel        = National.DeathInit(obs_stop="$( Date(ps.cases) + Day(1))"),
+    deathmodel        = National.DeathInit(obs_stop="$( Date(ps.cases) + Day(60))"),
     casemodel         = National.CaseInit(obs_start=ps.cases),
+    # hospitmodel       = National.HospitInit(obs_stop="$( Date(ps.cases) + Day(1))")
     link              = KLogistic(3.),
     invlink           = KLogit(3.),
     lockdown          = "2020-03-18",
     covariates_kwargs = Dict(
+        :semiparametric => ps.semipara,
         :fname => projectdir("data","smoothed_contact_rates.csv"),
         :shift => -1,
         :startdate => "2020-11-10",
         :enddate => nothing))
 turing_data = data.turing_data;
-
-# num_obs = turing_data.cases|>length
-# lockdown = turing_data.lockdown
-# covariates_start = turing_data.covariates_start
-# num_Rt_steps   = covariates_start-lockdown-1
-# num_obs
-# lockdown + num_Rt_steps + size(covariates, 1)
-# covariates = turing_data.covariates
-# size(covariates, 1)
-#
-# length(turing_data.cases)
-#
-# fname = normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" )
-# survey = load( fname )|>DataFrame
-# National.readcovariates(; covariates_kwargs...
-# )
-
-# findfirst(==(Date("2021-01-01")),data.dates) - findfirst(==(Date("2020-05-15")),data.dates) + 1
-# findfirst(==(Date("2021-01-01")),data.dates)
-# size(survey, 1)
-#
-#
-# data.dates
-#
-# covariates[140,1]
-# size(turing_data.covariates,1) - turing_data.covariates_start
 #----------------------------------------------------------------------------
 # sample model
 model = name2model[ps.model]
@@ -104,18 +79,18 @@ Turing.emptyrdcache()
 m()
 @time chain = sample(m, NUTS(ps.warmup, 0.95), ps.steps + ps.warmup; progress=true)
 
-@time chain = sample(m, NUTS(ps.warmup, 0.95), MCMCThreads(), ps.steps + ps.warmup, 3)
+# @time chain = sample(m, NUTS(ps.warmup, 0.95), MCMCThreads(), ps.steps + ps.warmup, 3)
 # using MCMCChains
 chain = chain[ps.warmup+1:end,:,:]
 # chain = chain[:,:,[2,4]]
 
 @info "Saving at: $(projectdir("out", fname))"
-safesave(projectdir("out/tmp", fname*".jls"), chain)
-##
+# safesave(projectdir("out/tmp", fname*".jls"), chain)
+## =====================================================================
 diagnostics = gelmandiag(chain)
 fname_diagnostics = projectdir("out/tmp", fname*"_GELMANDIAG.csv")
 safesave(fname_diagnostics, diagnostics)
-##
+## ======================================================================
 # data = ImperialUSAcases.Data(Dict(),turing_data,Dict("DK"=>dk.date),turing_data.deaths,"DK")
 # m = model(turing_data..., false)
 # chain = sample(m, Prior(), 2000)
