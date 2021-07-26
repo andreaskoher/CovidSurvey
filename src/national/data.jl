@@ -380,28 +380,9 @@ function parseweek(s)
     y + Week(w) - Day(3) #center at day 4
 end
 
-# ≈ 15days delay from infection to antibody production
-# see Ferguson Report and Zhao 2020: "Antibody responses to SARS-CoV-2 in patients of novel coronavirus disease 2019"
-function seroprev!(data; later_dataset = true)
-    @unpack dates_turing = data
-    df0 = CSV.File(projectdir("data/seroprevalence/", "seroprev_early.csv"), delim="\t")|>DataFrame
-    df1 = CSV.File(projectdir("data/seroprevalence/", "seroprev.csv"), delim="\t")|>DataFrame
-    df1[!,:date] = df1.week .|> parseweek
-    select!(df1, Not(:week))
-    df = later_dataset ? vcat(df0, df1) : df0
-    df = df[ dates_turing[1] .<= df.date .<= dates_turing[end], :]
-    parsepercent!(df)
-    df.CI = df.CI .|> parseCI
-    df[!,:std] = [max( abs.(df.country[i] .- df.CI[i])... ) / 1.96 for i in 1:length(df.CI)]
-    data["seroprev_std"]  = df.std
-    data["seroprev_mean"] = df.country
-    data["seroprev_idx"]  = [findfirst(==(d), dates_turing) for d in df.date]
-    data["seroprev"]      = df
-    return nothing
-end
-
 function parsepercent(x::String)
     x = strip(x, '%')
+    x = strip(x)
     x = replace(x, "," => ".")
     parse(Float64, x) / 100
 end
@@ -416,9 +397,9 @@ end
 function parsepercent!(df)
     regions = ["capital", "zealand", "south", "central", "north"]
     df.country = parsepercent.(df.country)
-    for r in regions
-        df[!,r] = parsepercent.(df[:,r])
-    end
+    # for r in regions
+    #     df[!,r] = parsepercent.(df[:,r])
+    # end
 end
 
 function findindices(dates, ds)
@@ -452,7 +433,7 @@ end
 #     s = innerjoin(s1, s2, on=:date)
 #     s[3:end,:] # skip first for data quality
 # end
-function readcovariates(; fname=nothing, shift=0, startdate=nothing, enddate=nothing, datecol=:date)
+function readcovariates(; fname=nothing, shift=0, startdate=nothing, enddate=nothing, datecol=:date, kwargs...)
     isnothing(fname) && (@error "please give a file name to covariates_kwargs")
     df = CSV.File(fname)|>DataFrame
     df[!,datecol] += Day(shift)
@@ -558,17 +539,22 @@ end
 
 function covariates!(data, predictors; covariates_kwargs...)
     @unpack dates_turing, num_obs = data
-    isnothing(predictors) && return
-    covariates       = readcovariates(; covariates_kwargs... )
-    covariates       = leftjoin(DataFrame(:date=>dates_turing), covariates, on=:date)
-    sort!(covariates, :date)
-    covariates_start = findfirst(x->!ismissing(x), covariates[:,Not(:date)][:,1])
-    covariates       = covariates[covariates_start:num_obs,:]
-    covariates       = select_predictors(covariates, predictors) #num_obs+shift_covariates, num_tot
-    covariates       = convert(Array{Float64,2}, covariates)
-    data["covariates"]       = covariates
-    data["covariates_start"] = covariates_start
-    return nothing
+    if isnothing(predictors)
+        data["covariates"]       = Array{Float64,2}(undef, 1,1)
+        data["num_covariates"]   = 0
+        data["covariates_start"] = 0
+    else
+        covariates       = readcovariates(; covariates_kwargs... )
+        covariates       = leftjoin(DataFrame(:date=>dates_turing), covariates, on=:date)
+        sort!(covariates, :date)
+        covariates_start = findfirst(x->!ismissing(x), covariates[:,Not(:date)][:,1])
+        covariates       = covariates[covariates_start:num_obs,:]
+        covariates       = select_predictors(covariates, predictors) #num_obs+shift_covariates, num_tot
+        covariates       = convert(Array{Float64,2}, covariates)
+        data["covariates"]       = covariates
+        data["covariates_start"] = covariates_start
+        data["num_covariates"]   = size(covariates,2)
+    end
 end
 
 function lockdown!(data, lockdown)
@@ -588,9 +574,13 @@ function stepindex(n, stepsize)
     index
 end
 
-function randomwalk!(data, stepsize=1)
-    @unpack num_obs, lockdown_index = data
-    n = num_obs - lockdown_index
+function randomwalk!(data, stepsize=1; covariates_kwargs)
+    @unpack num_obs, lockdown_index, covariates_start, num_covariates = data
+    n = if covariates_kwargs[:semiparametric] && data["num_covariates"] > 0
+        covariates_start-lockdown_index-1
+    else
+        num_obs - lockdown_index
+    end
     i = stepindex(n, stepsize)
     data["num_rt_steps"] = n
     data["rt_step_index"] = i
@@ -694,9 +684,71 @@ ObservParams!(data, o::HospitInit) = data["hospitmodel"] = ObservParams(data, o)
 ObservParams!(data, o::DeathInit)  = data["deathmodel"]  = ObservParams(data, o)
 # ObservParams!(data, o::Sero)    = data["seromodel"]   = ObservParams(data, o)
 
-observations(data, ::CaseInit)   = data["cases_turing"]
-observations(data, ::HospitInit) = data["hospit_turing"]
-observations(data, ::DeathInit)  = data["deaths_turing"]
+# observations(data, ::CaseInit)   = data["cases_turing"]
+# observations(data, ::HospitInit) = data["hospit_turing"]
+# observations(data, ::DeathInit)  = data["deaths_turing"]
+
+# ===========================================================================
+# sero
+
+# ≈ 15days delay from infection to antibody production
+# see Ferguson Report and Zhao 2020: "Antibody responses to SARS-CoV-2 in patients of novel coronavirus disease 2019"
+function readsero(;later_dataset = true)
+    df0 = CSV.File(projectdir("data/seroprevalence/", "seroprev_early.csv"), delim="\t")|>DataFrame
+    df1 = CSV.File(projectdir("data/seroprevalence/", "seroprev.csv"), delim="\t")|>DataFrame
+    df1[!,:date] = df1.week .|> parseweek
+    select!(df1, Not(:week))
+    df = later_dataset ? vcat(df0, df1) : df0
+    parsepercent!(df)
+    df.CI = df.CI .|> parseCI
+    df[!,:std] = [max( abs.(df.country[i] .- df.CI[i])... ) / 1.96 for i in 1:length(df.CI)]
+    return df
+end
+
+function SeroParams!(data, sero=SeroInit(); later_dataset = true)
+    @unpack dates_turing = data
+
+    df = readsero(;later_dataset)
+    s = isempty(sero.obs_start) ? dates_turing[1] : Date(sero.obs_start)
+    e = isempty(sero.obs_stop) ? dates_turing[end] : Date(sero.obs_stop)
+    df = df[ s .<= df.date .<= e, :]
+    data["seroprev"] = df
+
+    σ = df.std * population
+    uncertainty_dist = sero.dist.(σ, Ref(sero.cv))
+    params = (
+        mean  = df.country * population,
+        std = σ,
+        dstd  = arraydist( uncertainty_dist),
+        index = [findfirst(==(d), dates_turing) for d in df.date],
+        dates = df.date,
+        delay = sero.delay,
+        population = population
+    )
+    data["sero"] = df.country * population
+    data["seromodel"] = SeroParams5(params...)
+
+    return nothing
+end
+
+@kwdef struct SeroInit# <: ObservationInit
+    obs_start        ::String  = ""
+    obs_stop         ::String  = "2020-07-01"
+    delay            ::Int64   = 0
+    # population       ::Int64   = National.population
+    dist                       = InverseGamma2
+    cv               ::Float64 = 0.1
+end
+
+struct SeroParams5{M,S,D,I,A,Y,P}
+    mean::M
+    std::S
+    dstd::D
+    index::I
+    dates::A
+    delay::Y
+    population::P
+end
 
 # function hospitalizations!(data)
 #     params = (
@@ -723,10 +775,12 @@ function load_data(;
     casemodel         = CaseInit(),
     hospitmodel       = HospitInit(),
     deathmodel        = DeathInit(),
+    seromodel         = SeroInit(),
     link              = KLogistic(3.),
     invlink           = KLogit(3.),
     lockdown          = "2020-03-18",
     covariates_kwargs = Dict(
+        :semiparametric => false,
         :fname => projectdir("data","smoothed_contact_rates.csv"),
         :shift => -1,
         :startdate => "2020-11-10",
@@ -741,12 +795,12 @@ function load_data(;
     # cases_start_date!(data, cases_start)
     covariates!(data, predictors; covariates_kwargs...)
     lockdown!(data, lockdown)
-    seroprev!(data)
-    randomwalk!(data, rw_step)
+    randomwalk!(data, rw_step; covariates_kwargs)
     time_varying_iar!(data, casemodel, iar_step)
     ObservParams!(data, casemodel)
     ObservParams!(data, hospitmodel)
     ObservParams!(data, deathmodel)
+    SeroParams!(data, seromodel)
 
 
     # dk = begin
@@ -776,9 +830,15 @@ function load_data(;
         num_observations            = data["num_obs"],
         link                        = link,
         invlink                     = invlink,
-        seroprev_mean               = data["seroprev_mean"],
-        seroprev_std                = data["seroprev_std"],
-        seroprev_idx                = data["seroprev_idx"],
+        seromodel                   = data["seromodel"],
+        sero                        = data["sero"],
+        num_covariates              = data["num_covariates"],
+        covariates                  = data["covariates"],
+        covariates_start            = data["covariates_start"],
+        semiparametric              = covariates_kwargs[:semiparametric]
+        # seroprev_mean               = data["seroprev_mean"],
+        # seroprev_std                = data["seroprev_std"],
+        # seroprev_idx                = data["seroprev_idx"],
 
     )
 
@@ -794,7 +854,7 @@ function load_data(;
         predictors,
         data["seroprev"],
         lockdown,
-        observations_end,
+        data["observations_end"],
         -1,
         data["startdate"]
     )
