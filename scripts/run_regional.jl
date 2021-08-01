@@ -21,7 +21,7 @@ setadbackend(:reversediff)
 plotlyjs()
 @info "number of threads available: $(nthreads())"
 #-----------------------------------------------------------------------------
-# load packages
+# read input
 argtable = ArgParseSettings(
     description="This script samples from National.model using NUTS."
 )
@@ -33,7 +33,7 @@ argtable = ArgParseSettings(
     "--num-samples", "-n"
         help = "number of samples"
         arg_type = Int
-        default = 1000
+        default = 100
     "--num-chains", "-t"
         help = "number of chains sampled with multi-threading"
         arg_type = Int
@@ -41,7 +41,7 @@ argtable = ArgParseSettings(
     "--num-warmup", "-w"
         help = "number of samples to use for warmup/adaptation"
         arg_type = Int
-        default = 1000
+        default = 100
     "--observations-end", "-o"
         help = "end of observation date as string yyyy-mm-dd. Use full data set by defaults"
         arg_type = String
@@ -49,15 +49,15 @@ argtable = ArgParseSettings(
     "--cases-start", "-s"
         help = "start date for case observations as string yyyy-mm-dd. No case observations by default"
         arg_type = String
-        default = nothing
+        default = ""
     "--add-covariates", "-c"
         help = "list of covariate names (default empty string = no covariates). Choose: C: contacts, R:"
         arg_type = String
         default = nothing
     "--model", "-m"
-        help = "choose from: 'v1', 'gp'. Defaul: 'v1'"
+        help = "choose from: 'hospit', 'cases', 'deaths'. Defaul: 'hospit'"
         arg_type = String
-        default = "v1"
+        default = "hospit"
     "--plot-results", "-p"
         arg_type = Bool
         default = false
@@ -79,15 +79,18 @@ parsed_args = parse_args(ARGS, argtable)
 @info "load data"
 
 data_params = (
-      observations_end  = parsed_args["observations-end"]
+      observationsend   = parsed_args["observations-end"]
     , predictors        = parsed_args["add-covariates"]|> CovidSurvey.parse_predictors
-    , cases_start       = parsed_args["cases-start"]
-    , rw_step           = 1
-    , epidemic_start    = 30
-    , num_impute        = 6
+    # , hospitmodel       = Regional.HospitInit1(obs_stop="2020-07-01")
+    , casemodel         = Regional.CaseInit1(obs_start=parsed_args["cases-start"])
+    , seromodel         = Regional.SeroInit2(delay=0, std=1.)
+    , rwstep           = 1
+    , epidemicstart    = 10
+    , numimpute        = 6
     , link              = KLogistic(3.)
     , invlink           = KLogit(3.)
     , covariates_kwargs = Dict(
+      :semiparametric => true,
       :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
       :shift => -1,
       :startdate => "2020-11-10", # >= 1000 cases / day
@@ -113,111 +116,38 @@ const model = Regional.name2model[ps.model]
 !isnothing(ps.seed) && Random.seed!(ps.seed);
 @info ps
 m = model(turing_data, false)
-#----------------------------------------------------------------------------
+m();
+## ==========================================================================
 # sampling
-
-@time chain = if ps.chains > 1
-    sample(m, NUTS(ps.warmup, 0.95; max_depth=5), MCMCThreads(), ps.steps + ps.warmup, ps.chains; progress=true)
-else
-    sample(m, NUTS(ps.warmup, 0.95; max_depth=5), ps.steps + ps.warmup; progress=true) #; max_depth=15
-end
-#-----------------------------------------------------------------------------
-# save params
-fdir = projectdir("reports/", ps.folder)
-mkpath(fdir)
-@info "Saving at: $fdir"
-let
-    dic = Dict( zip( keys(ps), values(ps) ) )
-    safesave( normpath(fdir, ps.prefix*"params.csv"), DataFrame( dic ) )
-    bson( normpath(fdir, ps.prefix*"params.bson") ,  dic )
-end
-#-----------------------------------------------------------------------------
-# save chain
-chain = let
-    chain = chain[ps.warmup+1:end,:,:]
-    chain = chain[1:10:end,:,:]
-    fname = normpath( fdir, savename(ps.prefix*"CHAIN", ps, "jls") )
-    safesave( fname, chain )
-end
-#-----------------------------------------------------------------------------
-@info "make predictions"
-generated_posterior = Regional.posterior(model, turing_data, chain)
-let
-    fname = normpath( fdir, savename(ps.prefix*"GENERATED-QUANTITIES", ps, "bson") )
-    dic = Dict( zip( keys(generated_posterior), values(generated_posterior) ) )
-    bson( fname ,  dic )
+@time chain = let
+    thinning = 10
+    if ps.chains > 1
+        sample(m, NUTS(ps.warmup, 0.95; max_depth=5), MCMCThreads(), ps.steps + ps.warmup, ps.chains; progress=true, thinning)
+    else
+        sample(m, NUTS(ps.warmup, 0.95; max_depth=5), ps.steps + ps.warmup; progress=true, thinning) #; max_depth=15
+    end
 end
 ## ==========================================================================
-@info "plot regions"
-for r in Regional.regions
-    recipe = Regional.RegionPlottingRecipe(data, generated_posterior, r)
-    p = plot(recipe)
-    fname = normpath( fdir, savename(ps.prefix*"FIG-$(uppercase(r))", ps, "html") )
-    savefig( p, fname )
-end
-##
-@info "plot rt"
-let
-    recipe = Regional.RtsPlottingRecipe(data, generated_posterior)
-    p = plot(recipe)
-    fname = normpath( fdir, savename(ps.prefix*"FIG-RT", ps, "html") )
-    savefig( p, fname )
-end
-##
-@info "plot hospitalizations"
-let
-    recipe = Regional.HospitsPlottingRecipe(data, generated_posterior)
-    p = plot(recipe)
-    fname = normpath( fdir, savename(ps.prefix*"FIG-HOSPIT", ps, "html") )
-    savefig( p, fname )
+@info "save"
+fdir = projectdir("reports/", ps.folder)
+ignores = [k for (k,v) in pairs(ps) if ((v isa String) && isempty(v))]
+
+mkpath(fdir)
+@info "Saving at: $fdir"
+fname = let
+    dic = Dict( zip( keys(ps), values(ps) ) )
+    fname = normpath(fdir, savename(ps.prefix*"PARAMS", ps, "csv"; ignores) )
+    safesave( fname, DataFrame( dic ) )
+    bson( normpath(fdir, ps.prefix*"params.bson") ,  dic )
+
+    fname = normpath( fdir, savename(ps.prefix*"DATA", ps, "bson"; ignores) )
+    bson( fname, Dict("data"=>data) )
+
+    fname = normpath( fdir, savename(ps.prefix*"CHAIN", ps, "jls"; ignores) )
+    safesave( fname, chain )
+    fname
 end
 
-#-----------------------------------------------------------------------------
-# @info "store reproduction number"
-# rt = let
-#     ib = findfirst(==(Date("2020-05-15")), data.dates)
-#     ie = findfirst(==(Date(ps.observ)), data.dates)
-#     Rt_array = hcat(Rt...)[ib:ie,:]
-#
-#     qs = [quantile(v, [0.025, 0.25, 0.5, 0.75, 0.975]) for v in eachrow(Rt_array)]
-#     llq, lq, mq, uq, uuq = (eachrow(hcat(qs...))..., )
-#
-#     date = data.dates[ib:ie]
-#     DataFrame((;date, llq, lq, mq, uq, uuq))
-# end
-# fname = normpath( fdir, savename(ps.prefix*"Rt", ps, "csv") )
-# save(fname, rt)
-
-#-----------------------------------------------------------------------------
-# perform diagnostics
-if ps.chains > 1
-    @info "gelman diagnostics"
-    diagnostics = gelmandiag(chain)
-    fname = normpath( fdir, savename(ps.prefix*"GELMANDIAG", ps, "csv") )
-    safesave( fname, diagnostics)
-    pretty_table(diagnostics; crop=:none)
-end
-#-----------------------------------------------------------------------------
-@info "plot chain"
-n = filter( x->!occursin(r"latent_Rts", x), String.(names(chain)))
-let
-    p = plot(chain[n])
-    fname = normpath( fdir, savename(ps.prefix*"CHAINSPLOT", ps, "html") )
-    savefig(p, fname )
-    parsed_args["plot-results"] && run(`firefox $(fname)`, wait=false)
-end
-#-----------------------------------------------------------------------------
-@info "meanplot"
-let
-    p = meanplot(chain[n]);
-    fname = normpath( fdir, savename(ps.prefix*"MEANPLOT", ps, "html") )
-    savefig(p, fname )
-    parsed_args["plot-results"] && run(`firefox $(fname)`, wait=false)
-end
-#-----------------------------------------------------------------------------
-# @info "plot prior vs. posterior"
-# pchain = sample(m, Prior(), ps.steps + ps.warmup; progress=true)[ps.warmup+1:end,:,:]
-# n = filter( x->!occursin(r"\[", x), String.(names(pchain)))
-# p = density(chainscat(pchain[n], chain[n]))
-# savefig(p, projectdir("figures/tmp", fname*"_PRIORvsPOSTERIOR.html") )
-# run(`firefox $(projectdir("figures/tmp", fname*"_PRIORvsPOSTERIOR.html"))`, wait=false)
+## ==========================================================================
+@info "post-processing"
+Regional.postprocessing(fname)

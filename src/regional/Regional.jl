@@ -3,15 +3,19 @@ module Regional
 using DrWatson
 using Turing
 using StatsBase
+using MCMCChains: Chains, meanplot, gelmandiag
+using PrettyTables
+using BSON
+# using Parameters
 # using ArgCheck
 # using RData
-# using DrWatson
 using CSV
 using DataFrames
 using OrderedCollections
 using Dates
 using StatsBase
 using StatsFuns
+using Base:@kwdef
 using Base.Threads# using FillArrays
 # using KernelFunctions
 using Random
@@ -20,6 +24,9 @@ using LaTeXStrings
 
 # using QuadGK
 # using
+
+abstract type ObservationInit end
+abstract type ObservationsModel end
 
 using ..CovidSurvey#: NegativeBinomial2
 
