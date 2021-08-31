@@ -1,22 +1,29 @@
 Plots.histogram(d::Distributions.Distribution, args...; kwargs...) =
     histogram(rand(d, 1000), args...; label=nothing, kwargs...)
 
-## ===========================================================================
+datacols(df) = Symbol.(names(df, Not(:date)))
+
+# ===========================================================================
 # read data
 const ctype = [:family, :colleagues, :friends, :strangers]
 parsedate(x) = Date("$x", dateform)
-function readcontacts(fname)
+function readcontacts(fname; select_region=0)
     raw = CSV.File(fname)|>DataFrame
+    raw = select_region > 0 ? raw[raw.region .== select_region, :] : raw
     data = DataFrames.select(raw, :Q4a_1 => :family, :Q4a_2 => :colleagues, :Q4a_3 => :friends, :Q4a_4 => :strangers )
     data[!, :date] = parsedate.(raw.Timings_yyyymmdd)
-    return sort(data, :date)
+    sort!(data, :date)
+
+    d = data.date
+    @assert length(unique(d)) == length(first(d):Day(1):last(d))
+    return data
 end
-## =============================================================================
+# =============================================================================
 # remove outliers
 function maskoutliers(data, p=99.9)
     outliers = zeros(size(data,1))
-    for c in ctype
-        threshold = percentile(data[:,c], p)
+    for c in datacols(data)
+        threshold = p isa Number ? percentile(data[:,c], p) : p[c]
         @show "threshold for $c: $threshold"
         outliers .+= (threshold .< data[!,c])
         outliers .+= (data[!,c] .< 0)
@@ -50,14 +57,14 @@ function contact_histograms(data; day=nothing, kwargs...)
     end
 
     ps = Vector{Plots.Plot}()
-    for c in ctype
+    for c in datacols(data)
         p = histogram( df[!, c]; label=nothing, xticks=:native, yticks=:native, title="$c", kwargs...)
         push!(ps, p)
     end
     plot(ps..., layout=(2,2), size=(800, 500))
 end
 
-## =============================================================================
+# =============================================================================
 # plot timeseries stats
 
 lowerquant(x) = percentile(x, 25)
@@ -95,7 +102,7 @@ function firefox(p; fname="tmp.html", fdir=normpath(homedir(), ".tmp"))
     return p
 end
 
-function CovidSurvey.plot_confidence_timeseries(df::DataFrame; datecol=:date, cols=ctype, kwargs...)
+function CovidSurvey.plot_confidence_timeseries(df::DataFrame; datecol=:date, cols=datacols(df), kwargs...)
     ps = Vector{Plots.Plot}()
     n  = length(cols)
     for c in cols
@@ -106,14 +113,14 @@ function CovidSurvey.plot_confidence_timeseries(df::DataFrame; datecol=:date, co
     firefox(p)
 end
 
-## =============================================================================
+# =============================================================================
 # zero data
 function countzeros(data)
     nzeros(x) = count( ==(0), x )
     grouped = groupby(data, :date; sort=true)
     combine(
         grouped,
-        Pair.(ctype, Ref(nzeros))...,
+        Pair.(datacols(data), Ref(nzeros))...,
         renamecols = false
     )
 end
@@ -131,9 +138,8 @@ function plot_timeseries(df)
     p = plot(ps..., layout=(n,1), size=(1000, n*200))
     firefox(p)
 end
-##
 
-## =============================================================================
+# =============================================================================
 
 function Turing.Chains(q::MultivariateTransformed, model, samples=1000; ignorekeys=[])
     _, sym2range = bijector(model, Val(true))
@@ -151,7 +157,7 @@ function Turing.Chains(q::MultivariateTransformed, model, samples=1000; ignoreke
     end
     Chains(d)
 end
-## ===========================================================================
+# ===========================================================================
 # zero inflated distributions
 
 struct ZeroInflatedDistribution{E,P} <: Distribution{Univariate, Discrete}
@@ -183,7 +189,7 @@ function Distributions.logpdf(
     end
 end
 
-## test inference with zero inflated distributions
+# test inference with zero inflated distributions
 # μ = 2.
 # ϕ = 10.
 # p = 0.2
@@ -208,8 +214,7 @@ end
 # c = sample(test(y, length(y)), NUTS(1000, 0.8), 2000; progress=true)
 # plot(c[1001:end,:,:])
 
-## ========================================================================
-## =============================================================================
+# =============================================================================
 struct FixedRandomWalk{N, S} <: ContinuousMultivariateDistribution
     n::N
     s::S
@@ -235,8 +240,11 @@ Bijectors.bijector(d::FixedRandomWalk) = Bijectors.Identity{1}()
 
 Base.length(d::FixedRandomWalk) = d.n
 
-## =============================================================================
+# =============================================================================
 function date2index(ds)
+    Δds = unique(diff(ds))
+    @assert length(Δds) == 2 #0 and time step
+    Δd = last(Δds)
     i  = 1
     is = [i]
     d  = first(ds)
@@ -244,19 +252,16 @@ function date2index(ds)
         d_new = ds[j]
         if d_new == d
             push!(is, i)
-        elseif d_new == d + Day(1)
+        else d_new == d + Δd
             i += 1
             d = d_new
             push!(is, i)
-        else
-            @error "time is not contingeous: gap at j=$j"
-            throw(Exception)
         end
     end
     return is
 end
 
-## =============================================================================
+# =============================================================================
 # Hidden markov model with zero inflated likelihood
 abstract type SurveyProblem end
 include(projectdir("scripts","survey","problems","zipoisson.jl"))
@@ -265,7 +270,7 @@ include(projectdir("scripts","survey","problems","zinegbinomial.jl"))
 # include(projectdir("scripts","survey","problems","weekdayeffect.jl"))
 
 
-## =============================================================================
+# =============================================================================
 function Optim.optimize(problem::SurveyProblem, args...; kwargs...)
 
     t  = problem_transformation(problem)
@@ -311,7 +316,7 @@ end
 
 function Optim.optimize(survey::SurveyInferenceProblem, args...; kwargs...)
     @unpack date = survey.data
-    dates = first(date) : Day(1) : last(date)
+    dates = sort(unique(date))#first(date) : Day(1) : last(date)
 
     θs       = []
     problems = []
@@ -336,12 +341,12 @@ function Optim.optimize(survey::SurveyInferenceProblem, args...; kwargs...)
     end
     SurveyInferenceResults(
         survey.problemtype, survey.names, survey.data,
-        vcat(θs...), vcat(problems...), vcat(μs...), vcat(optims...), dates
+        vcat(θs...), vcat(problems...), hcat(μs...), vcat(optims...), dates
     )
 end
 
 function CovidSurvey.plot_confidence_timeseries(results::SurveyInferenceResults)
-    @unpack data, names, problem, θ = results
+    @unpack data, names, problem, θ, μ = results
     for (i, n) in enumerate(names)
         y = predict(problem[i], θ[i])
         label_data = "data ($n)"
@@ -354,8 +359,11 @@ function CovidSurvey.plot_confidence_timeseries(results::SurveyInferenceResults)
         )
 
         p = CovidSurvey.plot_confidence_timeseries(df; cols=[label_fake, label_data])
-        firefox(p; fname="inference_result_$n.html")
-        break
+
+        t = sort(unique(df.date))
+        plot!(t, μ[:,i], lw=2, c=:black, label="effective contacts")
+        p = firefox(p; fname="inference_result_$n.html")
+        display(p)
     end
 end
 
@@ -363,11 +371,12 @@ function plot_generated_quantities(
     results::SurveyInferenceResults;
     fdir = normpath(homedir(), ".tmp"),
     fname="generated_quantities.html",
-    compare_old=false
+    compare_old=false,
+    kwargs...
 )
     @unpack names, θ, dates = results
     ps = Vector{Plots.Plot}()
-    data_old = National.readsurvey("/home/and/data/covidsurvey/contacts_0425_2m.csv")
+    data_old = National.readsurvey("/home/and/data/covidsurvey/contacts_0425_2m.csv"; kwargs...)
     for (i, n) in enumerate(names)
         μ = θ[i].μ
         p = plot(dates, μ, xticks=:native, title="$n", lab="inferred contact rate")
@@ -400,11 +409,11 @@ function plot_survey_histograms(
             y = y[mask]
         end
 
-        p = histogram( ŷ, bins=0:20, label="posterior", fc=:gray, lw=0, yticks=:native, leg=:topright)
-        histogram!(y, bins=0:20, label="data", fα=0., lc=:blue, lw=2, yticks=:native)
+        p = histogram( ŷ, bins=0:20, label="posterior", fc=:gray, lw=0, yticks=:native, leg=:topright, normalize=true)
+        histogram!(y, bins=0:20, label="data", fα=0., lc=:blue, lw=2, yticks=:native, normalize=true)
         push!(ps, p)
     end
-    p = plot(ps..., layout=(2,2), size=(800, 500))
+    p = plot(ps..., layout=(length(names),1), size=(800, 500))
     # firefox(p; fname, fdir)
     p
 end
