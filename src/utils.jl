@@ -5,6 +5,8 @@ struct RandomWalk{Tn, Ts, Tx} <: ContinuousMultivariateDistribution
     s::Ts
     x0::Tx
 end
+RandomWalk(n) = RandomWalk(n, 1., 0.)
+
 
 Distributions.rand(rng::AbstractRNG, d::RandomWalk{Tn, Ts, Tx}) where {Tn, Ts, Tx} = begin
     x = Vector{Tx}(undef, d.n)
@@ -288,13 +290,17 @@ short2long = Dict(
     :SE => "self_efficay",
     :RC => "response_cost",
     :RE => "response_efficacy",
-    :RM => "residential_mobility",
-    :NM => "nonresidential_mobility",
+    :MRES => "residential",
+    :MNRES => "nonresidential",
+	:MR => "retail",
+	:MG => "grocery",
+	:MW => "workplaces",
     :L  => "lockdown",
     :CR => "friends",
     :CC => "colleagues",
     :CF => "family",
     :CS => "strangers",
+	:CT => "total",
 )
 
 function parseval(sval)
@@ -343,4 +349,22 @@ function firefox(p)
     savefig(p, fname)
     run(`firefox $(fname)`, wait=false)
     return nothing
+end
+
+"""
+# hpdi
+Compute high density region.
+Derived from `hpd` in MCMCChains.jl.
+By default alpha=0.11 for a 2-sided tail area of p < 0.055% and p > 0.945%.
+"""
+function hpdi(x::Vector{T}; alpha=0.11) where {T<:Real}
+    n = length(x)
+    m = max(1, ceil(Int, alpha * n))
+
+    y = sort(x)
+    a = y[1:m]
+    b = y[(n - m + 1):n]
+    _, i = findmin(b - a)
+
+    return [a[i], b[i]]
 end
