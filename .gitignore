@@ -12,3 +12,6 @@
 *.svg
 *.png
 *.pdf
+*.ods
+*.rds
+*.tsv
