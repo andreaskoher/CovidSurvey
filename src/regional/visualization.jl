@@ -2,17 +2,28 @@ using OrderedCollections
 
 abstract type PlottingRecipe end
 
-Plots.plot(pr::PlottingRecipe, args...) = plot!(plot(), pr, args...)
+Plots.plot(pr::PlottingRecipe, args...; kwargs...) = plot!(plot(), pr, args...; kwargs...)
 
 # =============================================================================
 # for a single region
 
-struct ObservationPlottingRecipe{Tsd, Ted, To, Te, Tl} <: PlottingRecipe
+struct ObservationPlottingRecipe1{Tsd, Ted, To, Te, Tp, Tl} <: PlottingRecipe
     startdate ::Tsd
     enddate   ::Ted
     observed  ::To
     expected  ::Te
+    predicted ::Tp
     label     ::Tl
+end
+
+struct ObservationWithPredictorsPlottingRecipe1{Tsd, Ted, To, Te, Tp, Tl, Psd} <: PlottingRecipe
+    startdate ::Tsd
+    enddate   ::Ted
+    observed  ::To
+    expected  ::Te
+    predicted ::Tp
+    label     ::Tl
+    pstartdate::Psd
 end
 
 function expected(data, gp, region, label)
@@ -49,6 +60,25 @@ function observed(data, region, label)
     return (; dates, values )
 end
 
+function predicted(data, gp, region, label)
+    @assert label in ["cases", "hospitalizations", "deaths"]
+    i  = region isa Integer ? region : findfirst(==(region), data.regions)
+    dates = data.dates[i]
+    if label == "cases"
+        values = gp.predicted_daily_cases[i]
+        # start  = data.turing_data.casemodel.starts[i]
+        # stop   = data.turing_data.casemodel.stops[i]
+        # dates  =
+        return (; dates, values )
+    elseif label == "hospitalizations"
+        values = gp.predicted_daily_hospits[i]
+        return (; dates, values )
+    else
+        values = gp.predicted_daily_deaths[i]
+        return (; dates, values )
+    end
+end
+
 function startdate(data::Regional.Data, region, label::String)
     @assert label in ["cases", "hospitalizations", "deaths"]
     i = region isa Integer ? region : findfirst(==(region), data.regions)
@@ -75,38 +105,84 @@ function enddate(data::Regional.Data, region, label::String)
     return data.dates[i][s]
 end
 
-function ObservationPlottingRecipe(data::Regional.Data, gp, region, label)
+function ObservationPlottingRecipe1(data::Regional.Data, gp, region, label)
     e = expected(data, gp, region, label)
     o = observed(data, region, label)
+    p = predicted(data, gp, region, label)
     sd = startdate(data, region, label)
     ed = enddate(data, region, label)
-    return ObservationPlottingRecipe( sd, ed, o, e, label)
+    isnothing(data.predictors) && return ObservationPlottingRecipe1( sd, ed, o, e, p, label)
+    pstartdate = Date("2020-11-10")
+    return ObservationWithPredictorsPlottingRecipe1( sd, ed, o, e, p, label, pstartdate)
 end
 
-function Plots.plot!(p::Plots.Plot, r::ObservationPlottingRecipe)
+function Plots.plot!(p::Plots.Plot, r::ObservationPlottingRecipe1; plot_only_fit=false)
     o  = r.observed
     e  = r.expected
+    pr = r.predicted
     ed = r.enddate
     sd = r.startdate
 
+    if !plot_only_fit
+        vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+        vline!(p, [sd], lab="start observations", lw=2, lc=:black, hover="$sd", ls=:dash)
+    end
     plot!(p, o.dates, o.values, α=0.5, lc=:match, lab="observed $(r.label)", c=:midnightblue, lw=4, ylab="cases")
-    vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
-    vline!(p, [sd], lab="start observations", lw=2, lc=:black, hover="$sd", ls=:dash)
+    plot_confidence_timeseries!(p, pr.dates, pr.values; label = "predicted $(r.label)", c=:midnightblue) #Dict(hover=>strdates)
     plot_confidence_timeseries!(p, e.dates, e.values; label = "expected $(r.label)") #Dict(hover=>strdates)
+    if plot_only_fit
+        xlo = Dates.value.(sd)
+        xup = Dates.value.(ed)
+        yup = maximum( o.values[o.dates .< ed] ) * 1.1
+        xlims!(p, xlo, xup)
+        ylims!(p, 0, yup)
+    end
+    return p
+end
+
+function Plots.plot!(p::Plots.Plot, r::ObservationWithPredictorsPlottingRecipe1; plot_only_fit = false)
+    o  = r.observed
+    e  = r.expected
+    pr = r.predicted
+    ed = r.enddate
+    sd = r.startdate
+    psd= r.pstartdate
+
+    if !plot_only_fit
+        vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+        vline!(p, [sd], lab="start observations", lw=2, lc=:black, hover="$sd", ls=:dash)
+    end
+    vspan!(p, [psd, ed], label="fit to survey data", α=0.2, fc=:midnightblue)
+    bar!(p, o.dates, o.values, α=0.5, lc=:match, lab="observed $(r.label)", c=:midnightblue, lw=4, ylab="cases")
+    plot_confidence_timeseries!(p, pr.dates, pr.values; label = "predicted $(r.label)", c=:royalblue ) #Dict(hover=>strdates)
+    plot_confidence_timeseries!(p, e.dates, e.values; label = "expected $(r.label)", c=:peru) #Dict(hover=>strdates)
+    if plot_only_fit
+        xlo = Dates.value.(sd)
+        xup = Dates.value.(ed)
+        yup = maximum( o.values[o.dates .< ed] ) * 1.1
+        xlims!(p, xlo, xup)
+        ylims!(p, 0, yup)
+    end
+    return p
 end
 
 # ============================================================================
 # seropos
 
-struct SeroPlottingRecipe{E, O, L} <: Regional.PlottingRecipe
+struct SeroPlottingRecipe1{SD, ED, E, O, L} <: Regional.PlottingRecipe
+    startdate  ::SD
+    enddate    ::ED
     expecteds  ::E
     observeds  ::O
     label     ::L
 end
 
-function SeroPlottingRecipe(data::Regional.Data, gp, region, label)
+function SeroPlottingRecipe1(data::Regional.Data, gp, region, label)
     @unpack dates, means, CIs, delay, populations = data.turing_data.seromodel
     i  = region isa Integer ? region : findfirst(==(region), data.regions)
+    sd = first(data.dates[i])# startdate(data, region, "hospitalizations")
+    ed = Date(data.observations_end)
+
     observed   = let
         mean = means[i] * 100
         error = [(m-l*100, u*100-m) for (m,(l,u)) in zip(mean,CIs[i])]
@@ -117,49 +193,106 @@ function SeroPlottingRecipe(data::Regional.Data, gp, region, label)
         dates  = data.dates[i] + Day(delay)
         (; dates, values)
     end
-    SeroPlottingRecipe( expected, observed, label)
+    SeroPlottingRecipe1( sd, ed, expected, observed, label)
 end
 
-function Plots.plot!(p::Plots.Plot, r::SeroPlottingRecipe)
+function Plots.plot!(p::Plots.Plot, r::SeroPlottingRecipe1; plot_only_fit = false)
+    sd= r.startdate
+    ed= r.enddate
     e = r.expecteds
     o = r.observeds
 
     plot_confidence_timeseries!(p, e.dates, e.values; r.label)
     y  = o.mean
     ye = o.error
-    scatter!(p, o.dates, y, yerror=ye, hover=["$d: $val" for (d, val) in zip(o.dates, y)])
+    scatter!(p, o.dates, y, yerror=ye, hover=["$d: $val" for (d, val) in zip(o.dates, y)], lab="serological survey")
+    if plot_only_fit
+        xlo = Dates.value.(sd)
+        xup = Dates.value.(ed)
+        yup = maximum([ maximum( v[e.dates .< ed] ) for v in e.values ]) * 1.1
+        xlims!(p, xlo, xup)
+        ylims!(p, 0, yup)
+    end
+    return p
 end
 
 # ============================================================================
 # reproduction number for a single region
 
-struct RtPlottingRecipe{Tlo, Ted, Te, Tl} <: Regional.PlottingRecipe
+struct RtPlottingRecipe1{Tlo, Tst, Ted, Te, Tl} <: Regional.PlottingRecipe
     lockdown  ::Tlo
-    enddates  ::Ted
+    startdate ::Tst
+    enddate  ::Ted
     expected  ::Te
     label     ::Tl
 end
 
-function RtPlottingRecipe(data::Regional.Data, generated_posterior, region, label)
+struct RtWithPredictorsPlottingRecipe1{Tlo, Tst, Ted, Te, Tl, Psd} <: Regional.PlottingRecipe
+    lockdown  ::Tlo
+    startdate ::Tst
+    enddate  ::Ted
+    expected  ::Te
+    label     ::Tl
+    pstartdate::Psd
+end
+
+function RtPlottingRecipe1(data::Regional.Data, generated_posterior, region, label)
     i  = region isa Integer ? region : findfirst(==(region), data.regions)
     dates      = data.dates[i]
     values     = generated_posterior.Rts[i]
     expected   = (; dates, values )
-    lockdown   = Date(data.lockdown)
-    enddates   = Date(data.observations_end)
-    RtPlottingRecipe( lockdown, enddates, expected, label)
+    lo = Date(data.lockdown)
+    sd = first(data.dates[i])
+    ed = Date(data.observations_end)
+
+    isnothing(data.predictors) && return RtPlottingRecipe1( lo, sd, ed, expected, label)
+    psd = Date("2020-11-10")
+    return RtWithPredictorsPlottingRecipe1( lo, sd, ed, expected, label, psd)
 end
 
-function Plots.plot!(p::Plots.Plot, r::RtPlottingRecipe)
+function Plots.plot!(p::Plots.Plot, r::RtPlottingRecipe1; plot_only_fit = false)
     e  = r.expected
-    ed = r.enddates
+    sd = r.startdate
+    ed = r.enddate
     lo = r.lockdown
 
-    vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
-    vline!(p, [lo], lab="lockdown", lw=2, lc=:black, hover="$lo", ls=:dash)
+    if !plot_only_fit
+        vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+        vline!(p, [lo], lab="lockdown", lw=2, lc=:black, hover="$lo", ls=:dash)
+    end
     plot_confidence_timeseries!(p, e.dates, e.values; label = r.label) #Dict(hover=>strdates)
+    if plot_only_fit
+        xlo = Dates.value.(sd)
+        xup = Dates.value.(ed)
+        # yup = maximum( o.values[o.dates .< ed] ) * 1.1
+        xlims!(p, xlo, xup)
+        # ylims!(p, 0, yup)
+    end
+    return p
 end
 
+function Plots.plot!(p::Plots.Plot, r::RtWithPredictorsPlottingRecipe1; plot_only_fit = false)
+    e  = r.expected
+    sd = r.startdate
+    ed = r.enddate
+    lo = r.lockdown
+    psd= r.pstartdate
+
+    if !plot_only_fit
+        vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+        vline!(p, [lo], lab="lockdown", lw=2, lc=:black, hover="$lo", ls=:dash)
+    end
+    vspan!(p, [psd, ed], label="fit to survey data", α=0.2, fc=:midnightblue)
+    plot_confidence_timeseries!(p, e.dates, e.values; label = r.label) #Dict(hover=>strdates)
+    if plot_only_fit
+        xlo = Dates.value.(sd)
+        xup = Dates.value.(ed)
+        # yup = maximum( e.values[e.dates .< ed] ) * 1.1
+        xlims!(p, xlo, xup)
+        # ylims!(p, 0, yup)
+    end
+    return p
+end
 # ============================================================================
 # region plot
 
@@ -170,13 +303,13 @@ struct RegionPlottingRecipe{Tr,Tt,T} <: Regional.PlottingRecipe
 end
 
 posterior2recipe = OrderedDict(
-    :expected_daily_cases   => ObservationPlottingRecipe,
-    :expected_daily_hospits => ObservationPlottingRecipe,
-    :expected_daily_deaths  => ObservationPlottingRecipe,
-    :Rts                    => RtPlottingRecipe,
+    :expected_daily_cases   => ObservationPlottingRecipe1,
+    :expected_daily_hospits => ObservationPlottingRecipe1,
+    :expected_daily_deaths  => ObservationPlottingRecipe1,
+    :Rts                    => RtPlottingRecipe1,
     # :iar                    => IARPlottingRecipe,
-    # :effective_Rt           => RtPlottingRecipe,
-    :expected_seropos       => SeroPlottingRecipe,
+    # :effective_Rt           => RtPlottingRecipe1,
+    :expected_seropos       => SeroPlottingRecipe1,
 )
 
 posterior2label = OrderedDict(
@@ -186,7 +319,7 @@ posterior2label = OrderedDict(
     :Rts                    => "reproduction number",
     # :iar                   => "infections ascertainment rate",
     # :effective_Rt          => "effective reproduction number",
-    :expected_seropos      => "sero positive"
+    :expected_seropos      => "total infected"
 )
 
 function RegionPlottingRecipe(data::Data, generated_posterior, region)
@@ -205,15 +338,15 @@ function RegionPlottingRecipe(data::Data, generated_posterior, region)
     RegionPlottingRecipe(recipes, titles, region)
 end
 
-function Plots.plot(r::RegionPlottingRecipe)
+function Plots.plot(r::RegionPlottingRecipe; kwargs...)
     plots  = Vector{Plots.Plot}()
     nplots = length(r.recipes)
     for (recipe, title) in zip(r.recipes, r.titles)
         p = plot(; xaxis = true, legend = :outertopright, title)
-        plot!(p, recipe)
+        plot!(p, recipe; kwargs...)
         push!(plots, p)
     end
-    plot(plots..., layout=(nplots,1), size=(1500, nplots*250), sharex=true, link=:x)
+    plot(plots..., layout=(nplots,1), size=(1000, nplots*250), sharex=true, link=:x)
 end
 
 # Plots.plot(data::Data, generated_posterior) =
@@ -223,8 +356,9 @@ end
 # ============================================================================
 # reproduction number for all regions
 
-struct RtsPlottingRecipe{Tlo, Ted, Tre, Te} <: Regional.PlottingRecipe
+struct RtsPlottingRecipe{Tlo, Tsd, Ted, Tre, Te} <: Regional.PlottingRecipe
     lockdown  ::Tlo
+    startdates::Tsd
     enddate   ::Ted
     regions   ::Tre
     expecteds ::Te
@@ -235,28 +369,64 @@ function RtsPlottingRecipe(data::Regional.Data, generated_posterior)
     samples    = generated_posterior.Rts
     expecteds  = [(dates = d, values = g) for (d,g) in zip(dates, samples)]
     lockdown   = Date(data.lockdown) # NOTE use data["lockdown"] instead
+    startdates = first.(data.dates)
     enddate    = Date(data.observations_end) # NOTE use data["observations_end"] instead
-    RtsPlottingRecipe( lockdown, enddate, data.regions, expecteds)
+    RtsPlottingRecipe( lockdown, startdates, enddate, data.regions, expecteds)
 end
 
-function Plots.plot(r::RtsPlottingRecipe)
+function Plots.plot(r::RtsPlottingRecipe; kwargs...)
     plots  = Vector{Plots.Plot}()
     nplots = length(r.regions)
-    for (expected, region) in zip(r.expecteds, r.regions)
-        recipe = RtPlottingRecipe(r.lockdown, r.enddate, expected, "reproduction number")
+    for (expected, region, startdate) in zip(r.expecteds, r.regions, r.startdates)
+        recipe = RtPlottingRecipe1(r.lockdown, startdate, r.enddate, expected, "reproduction number")
         p = plot(; xaxis = true, legend = :outertopright, title="$region")
-        plot!(p, recipe)
+        plot!(p, recipe; kwargs...)
         push!(plots, p)
     end
     plot(plots..., layout=(nplots,1), size=(1000, nplots*200), sharex=true, link=:x)
 end
 
+# ============================================================================
+# observations for all regions
+
+struct RegionsOverviewPlottingRecipe{Tr,Tt,T} <: Regional.PlottingRecipe
+    recipes::Tr
+    titles ::Tt
+    region ::T
+end
 
 
+function RegionsOverviewPlottingRecipe(data::Data, generated_posterior, posterior)
+    # i  = region isa Integer ? region : findfirst(==(region), data.regions)
+    recipes = Vector{PlottingRecipe}()
+    titles  = Vector{String}()
+    for (i,region) in enumerate(data.regions)
+        label  = posterior2label[posterior]
+        recipe = posterior2recipe[posterior]
+        r      = recipe(data, generated_posterior, region, label)
+        title  = i == 1 ? label*" for the $region" : "$region"
+        push!(recipes, r)
+        push!(titles, title)
+    end
+    return RegionsOverviewPlottingRecipe(recipes, titles, data.regions)
+end
 
+function Plots.plot(r::RegionsOverviewPlottingRecipe; kwargs...)
+    # plots  = Vector{Plots.Plot}()
+    nplots = length(r.recipes)
 
+    title = r.titles[1]
+    p = plot(; xaxis = true, legend = :outertopright, title)
+    plot!(p, r.recipes[1]; kwargs...)
+    plots = [p]
 
-
+    for (recipe, title) in Iterators.drop(zip(r.recipes, r.titles),1)
+        p = plot(; xaxis = true, legend = nothing, title)
+        plot!(p, recipe; kwargs...)
+        push!(plots, p)
+    end
+    plot(plots..., layout=(nplots,1), size=(1000, nplots*250), sharex=true, link=:x)
+end
 
 
 
@@ -266,23 +436,23 @@ end
 # # ============================================================================
 # # reproduction number for a single region
 #
-# struct SingleRtPlottingRecipe{Tlo, Ted, Te} <: Regional.PlottingRecipe
+# struct SingleRtPlottingRecipe1{Tlo, Ted, Te} <: Regional.PlottingRecipe
 #     lockdown  ::Tlo
 #     enddates  ::Ted
 #     expected  ::Te
 # end
 #
-# function SingleRtPlottingRecipe(data::Regional.Data, generated_posterior, region)
+# function SingleRtPlottingRecipe1(data::Regional.Data, generated_posterior, region)
 #     i  = region isa Integer ? region : findfirst(==(region), data.regions)
 #     dates      = data.dates[i]
 #     values     = generated_posterior.Rts[i]
 #     expected   = (; dates, values )
 #     lockdown   = Date(data.lockdown)
 #     enddates   = Date(data.observations_end)
-#     SingleRtPlottingRecipe( lockdown, enddates, expected)
+#     SingleRtPlottingRecipe1( lockdown, enddates, expected)
 # end
 #
-# function Plots.plot!(p::Plots.Plot, rt::SingleRtPlottingRecipe)
+# function Plots.plot!(p::Plots.Plot, rt::SingleRtPlottingRecipe1)
 #     e  = rt.expected
 #     ed = rt.enddates
 #     lo = rt.lockdown
@@ -292,7 +462,7 @@ end
 #     plot_confidence_timeseries!(p, e.dates, e.values; label = "reproduction number") #Dict(hover=>strdates)
 # end
 #
-# Plots.plot(pr::SingleRtPlottingRecipe) = plot!(plot(), pr)
+# Plots.plot(pr::SingleRtPlottingRecipe1) = plot!(plot(), pr)
 
 # # ============================================================================
 # # region plot
@@ -306,7 +476,7 @@ end
 # posterior2recipe = OrderedDict(
 #     :expected_daily_hospits => Regional.SingleHospitPlottingRecipe,
 #     :expected_daily_deaths  => Regional.SingleDeathsPlottingRecipe,
-#     :Rts                    => Regional.SingleRtPlottingRecipe
+#     :Rts                    => Regional.SingleRtPlottingRecipe1
 # )
 #
 # posterior2title = OrderedDict(
