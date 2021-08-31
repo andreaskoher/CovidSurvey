@@ -99,11 +99,16 @@ struct SeroPlottingRecipe{E, O, L} <: National.PlottingRecipe
 end
 
 function SeroPlottingRecipe(data::National.Data, gp, label)
-    @unpack dates, mean, std = data.turing_data.seromodel
-    observed   = (; dates, mean, std )
+    @unpack dates, mean, CIs, delay, population = data.turing_data.seromodel
+    observed   = let
+        mean *= 100
+        error = [(m-l*100, u*100-m) for (m,(l,u)) in zip(mean,CIs)]
+        (; dates, mean, error )
+    end
+
     expected = let
-        values = gp.expected_seropos
-        dates  = data.dates
+        values = gp.expected_seropos  ./ population .* 100
+        dates  = data.dates + Day(delay)
         (; dates, values)
     end
     SeroPlottingRecipe( expected, observed, label)
@@ -113,9 +118,9 @@ function Plots.plot!(p::Plots.Plot, r::SeroPlottingRecipe)
     e = r.expected
     o = r.observed
 
-    plot_confidence_timeseries!(p, e.dates, e.values / population * 100; r.label)
-    y  = o.mean * 100 / population
-    ye = o.std * 100 / population
+    plot_confidence_timeseries!(p, e.dates, e.values; r.label)
+    y  = o.mean
+    ye = o.error
     scatter!(p, o.dates, y, yerror=ye, hover=["$d: $val" for (d, val) in zip(o.dates, y)])
 end
 # ============================================================================
