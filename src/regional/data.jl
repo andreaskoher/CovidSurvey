@@ -71,7 +71,7 @@ function startdate(df; epidemicstart = 30)
     start_idx = zeros(Int64, nregions)
     for (i, r) in enumerate(regions)
         cumulative = cumsum(df[:,r])
-        start_idx[i] = findfirst(>=(20), cumulative)
+        start_idx[i] = findfirst(>=(30), cumulative)
     end
     df.date[start_idx] .- Day(epidemicstart)
 end
@@ -109,14 +109,30 @@ end
 
 # ============================================================================
 
-function readcovariates(; fname=nothing, shift=0, startdate=nothing, enddate=nothing)
+function readcovariates(
+        ; fname=nothing
+        , shift=0
+        , startdate=nothing
+        , enddate=nothing
+        , datecol=:date
+        , aggregation=1
+        , mobility=nothing
+        , kwargs...
+)
+
     isnothing(fname) && (@error "please give a file name to covariates_kwargs")
-    df = CSV.File(fname)|>DataFrame
-    df.date += Day(shift)
+    surv = CSV.File(fname)|>DataFrame
+    rename!(surv, datecol=>"date")
+    surv.date += Day(shift)
+    surv = repeat(surv, inner=aggregation)
+    # ts = df.date[1] : Day(aggregation) : df.date[end]
+    #@assert all(df.date .== ts )
+    mobil = CSV.File(mobility) |> DataFrame
+    df = leftjoin(surv, mobil; on=:date)
+
     !isnothing(startdate) && filter!(row -> row.date >= Date(startdate), df)
     !isnothing(enddate) && filter!(row -> row.date <= Date(enddate), df)
-    ts = df.date[1] : Day(1) : df.date[end]
-    @assert all(df.date .== ts )
+    @assert issorted(df.date)
     @assert !any( ismissing.(Array(df)) )
     @assert all( isfinite.(Array(df)) )
     return df
@@ -230,11 +246,12 @@ end
 
 # ============================================================================
 
-function surveynorm!(xs)
+function surveynorm!(xs; standartize=false)
     i = findfirst(x->!ismissing(x), xs)
     xs[i] == 0. && return nothing
     xs ./= abs(xs[i])
     xs .-= xs[i]
+    standartize && (xs ./= std(xs))
     return nothing
 end
 
@@ -254,13 +271,14 @@ function preproc(xs::AbstractVector, num_observations, num_tot; normalize=nothin
     xs
 end
 
-function select_predictors(covariates, predictors, num_observations = nothing, num_tot = nothing)
+function select_predictors(covariates, predictors, num_observations = nothing, num_tot = nothing; standartize=false)
     predictors = String.(predictors)
 
     cov_names = filter(x->x!=="date", names(covariates))
     for k in cov_names
+        covariates[!,k] = convert.(Float64, covariates[!,k])
         if isnothing(num_observations) || isnothing(num_tot)
-            surveynorm!(covariates[!,k])
+            surveynorm!(covariates[!,k]; standartize)
         else
             covariates[!,k] = preproc(covariates[:,k], num_observations, num_tot; normalize=surveynorm!)
         end
@@ -268,7 +286,7 @@ function select_predictors(covariates, predictors, num_observations = nothing, n
 
     miss = .!( in.(predictors, Ref(cov_names) ) )
     any(miss) && (@error "predictor $(predictors[miss]) not found. Select either nonresidential_mobility, residential_mobility or from survey: $(surveyvars)")
-    Array( covariates[!,predictors] )
+    return Array( covariates[!,predictors] )
 end
 # ============================================================================
 
@@ -388,8 +406,9 @@ function totaldays(dates, startdates)
     return length.(regional_dates)
 end
 
-function lockdown!(data, lockdown)
+function lockdown!(data, lockdown, include_early_dynamic)
     @unpack dates_turing = data
+    include_early_dynamic && (data["lockdown_indices"] = fill(0, nregions); return)
     li = Vector{Int64}()
     for d in dates_turing
         i = findfirst(==(Date(lockdown)), d)
@@ -399,18 +418,22 @@ function lockdown!(data, lockdown)
     return nothing
 end
 
-function turingformat!(data, observationsend = nothing)
+function turingformat!(data, observationsend = nothing, predictive=false)
     @unpack dates, cases, hospit, deaths = data
     e = data["observationsend"] = isnothing(observationsend) ? last(dates) : Date(observationsend)
     s = data["startdates"]
-    data["num_tot"]       = totaldays(dates, s)
+    data["num_tot"]            = totaldays(dates, s)
     ts = data["dates_turing"]  = regional_timeseries(dates, s, e)
-    cs = data["cases_turing"]  = df2vec(cases, s, e)
-    hs = data["hospit_turing"] = df2vec(hospit, s, e)
-    ds = data["deaths_turing"] = df2vec(deaths, s, e)
+    cs = df2vec(cases, s, e)
+    hs = df2vec(hospit, s, e)
+    ds = df2vec(deaths, s, e)
     for (t,c,h,d) in zip(ts,cs,hs,ds)
         @assert length(t) == length(c) == length(h) == length(d)
     end
+
+    data["cases_turing"]  = !predictive ? cs : [similar(c, Missing) for c in cs]
+    data["hospit_turing"] = !predictive ? hs : [similar(h, Missing) for h in hs]
+    data["deaths_turing"] = !predictive ? ds : [similar(d, Missing) for d in ds]
     data["num_observations"]  = length.(data["dates_turing"])
     return nothing
 end
@@ -468,22 +491,55 @@ end
 #     return nothing
 # end
 
-function covariates!(data, predictors; kwargs...)
-    data["semiparametric"] = kwargs[:semiparametric]
-    isnothing(predictors) && (data["num_covariates"] = 0; return)
-    # @unpack dates_turing, num_observations = data
-    # covariates = readcovariates(; covariates_kwargs... )
-    # covariates = leftjoin(DataFrame(:date=>dates_turing), covariates, on=:date)
-    # sort!(covariates, :date)
-    # covariates_start = findfirst(x->!ismissing(x), covariates[:,Not(:date)][:,1])
-    # covariates = covariates[covariates_start:num_observations,:]
-    # covariates = select_predictors(covariates, predictors) #num_observations+shift_covariates, num_tot
-    # covariates = convert(Array{Float64,2}, covariates)
-    # data["covariates"] = covariates
-    # data["covariates_start"] = covariates_start
-    return nothing
-end
+function covariates!(data, predictors; covariates_kwargs...)
+    @unpack dates_turing, observationsend = data
+    if isnothing(predictors)
+        data["covariates"]       = [Array{Float64,2}(undef, 1,1) for i in 1:nregions]
+        data["num_covariates"]   = 0
+        data["covariates_starts"] = fill(0, nregions)
+    else
+        regional_covariates = Vector{Array{Float64,2}}()
+        covariates_start_indices = Vector{Int64}()
+        for i in 1:nregions
+            fname = covariates_kwargs[:fname][i]
+            fname_mobility = covariates_kwargs[:mobility][i]
+            covariates = Regional.readcovariates(
+                ; fname
+                , shift = covariates_kwargs[:shift]
+                , startdate = covariates_kwargs[:startdate]
+                # , enddate = covariates_kwargs[:enddate]
+                , datecol = covariates_kwargs[:datecol]
+                , mobility = fname_mobility
+                #, aggregation = covariates_kwargs[:aggregation]
+            )
+            sort!(covariates, :date)
 
+            startdate = Date(covariates_kwargs[:startdate])
+            stopdate  = observationsend
+
+            i_start = findfirst(==(startdate), covariates.date)
+            i_stop  = findfirst(==(stopdate), covariates.date)
+            @assert !isnothing(i_start)
+            @assert !isnothing(i_stop)
+
+            covariates = covariates[i_start:i_stop,:]
+            covariates = select_predictors(
+                              covariates, predictors
+                            ; standartize = covariates_kwargs[:standartize]
+            ) #num_obs+shift_covariates, num_tot
+            covariates = convert(Array{Float64,2}, covariates)
+
+            covariates_start_index = findfirst(==(startdate), dates_turing[i])
+
+            push!(regional_covariates, covariates)
+            push!(covariates_start_indices, covariates_start_index)
+        end
+        data["covariates"] = regional_covariates
+        @assert length(unique([size(regional_covariates[i],2) for i in nregions])) == 1
+        data["num_covariates"]   = size(regional_covariates[1],2)
+        data["covariates_starts"] = covariates_start_indices
+    end
+end
 # ============================================================================
 
 function rw_step_idx(num_observations, start_idx, iar_step)
@@ -510,23 +566,24 @@ function stepindex(n, stepsize)
     index
 end
 
-function randomwalk!(data, stepsize=1)
+function randomwalk!(data, stepsize, covariates_kwargs)
     @unpack num_observations, lockdown_indices, num_covariates = data
     ns = Vector{Int64}()
     is = Vector{Vector{Int64}}()
     for (i, (no, l)) in enumerate(zip(num_observations, lockdown_indices))
-        n = if data["semiparametric"] && data["num_covariates"] > 0
-            data["covariates_start"][i] - l - 1
+        n = if covariates_kwargs[:semiparametric] && data["num_covariates"] > 0
+            data["covariates_starts"][i] - l - 1
         else
             no - l
         end
         i = stepindex(n, stepsize)
-        push!(ns, n)
+        push!(ns, length(unique(i)))
         push!(is, i)
     end
     data["num_rt_steps"] = ns
     data["rt_step_index"] = is
 end
+
 
 # ============================================================================
 # observation model defaults
@@ -623,12 +680,6 @@ function stopindices(data, o)
     end
 end
 
-function holiday(dates)
-    specialdays = [Date("2020-12-24"), Date("2020-12-25"), Date("2020-12-31"), Date("2021-01-01")]
-    holidays = dates .∈ Ref(specialdays)
-    return convert(Vector{Int64}, holidays)
-end
-
 ObservParams3!(data, o::CaseInit1)   = data["casemodel"]   = ObservParams3(data, o)
 ObservParams3!(data, o::HospitInit1) = data["hospitmodel"] = ObservParams3(data, o)
 ObservParams3!(data, o::DeathInit1)  = data["deathmodel"]  = ObservParams3(data, o)
@@ -638,7 +689,7 @@ ObservParams3!(data, o::DeathInit1)  = data["deathmodel"]  = ObservParams3(data,
 
 function load_data(;
     observationsend  = nothing,
-    predictors        = nothing,
+    predictors       = nothing,
     rwstep           = 1,
     epidemicstart    = 30,
     numimpute        = 6,
@@ -649,23 +700,28 @@ function load_data(;
     link              = KLogistic(3.),
     invlink           = KLogit(3.),
     lockdown          = "2020-03-18",
+    predictive        = false,
+    include_early_dynamic = false,
     covariates_kwargs = Dict(
         :semiparametric => false,
         :fname => normpath( homedir(), "data/covidsurvey/smoothed_contacts.csv" ),
         :shift => 0,
         :startdate => nothing,
-        :enddate => nothing
+        :enddate => nothing,
+        :aggregation => 1,
+        :mobility => nothing
+        :standartize => false
     )
 )
 
     data = Dict{String, Any}()
     observables!(data)
     consistent!(data; epidemicstart)
-    turingformat!(data, observationsend)
+    turingformat!(data, observationsend, predictive)
     # cases_start_date!(data, cases_start)
     covariates!(data, predictors; covariates_kwargs...)
-    lockdown!(data, lockdown)
-    randomwalk!(data, rwstep)
+    lockdown!(data, lockdown, include_early_dynamic)
+    randomwalk!(data, rwstep, covariates_kwargs)
     ObservParams3!(data, casemodel)
     ObservParams3!(data, hospitmodel)
     ObservParams3!(data, deathmodel)
@@ -700,6 +756,11 @@ function load_data(;
         invlink                     = invlink,
         seromodel                   = data["seromodel"],
         sero                        = data["sero"],
+        num_covariates              = data["num_covariates"],
+        covariates                  = data["covariates"],
+        covariates_starts           = data["covariates_starts"],
+        semiparametric              = covariates_kwargs[:semiparametric],
+        include_early_dynamic       = include_early_dynamic,
         # num_i2h                     = 40,
         # ϕ_i2h                       = 5.41,
         # num_i2d                     = 60,
