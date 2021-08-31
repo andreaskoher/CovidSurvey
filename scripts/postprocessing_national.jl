@@ -32,13 +32,18 @@ argtable = ArgParseSettings(
         help = "plot and display with firefox"
         arg_type = Bool
         default = true
+    "--warmup", "-w"
+        help = "set nr. of warmup samples"
+        arg_type = Int64
+        default = nothing
 end
 
 parsed_args = parse_args(ARGS, argtable)
-exclude = isempty(parsed_args["exclude"]) ? [] : [Int64(i) for i in split(parsed_args["exclude"], ",")]
+exclude = isempty(parsed_args["exclude"]) ? [] : [parse(Int64,i) for i in split(parsed_args["exclude"], ",")]
 #------------------------------------------------------------------------------
-Regional.postprocessing(
+National.postprocessing(
     parsed_args["fname"];
     plot_results = parsed_args["plot-results"],
-    exclude
+    exclude,
+    warmup = parsed_args["warmup"]
 )
