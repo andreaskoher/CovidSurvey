@@ -17,24 +17,15 @@ using ReverseDiff
 using Memoization
 Turing.setrdcache(true)
 setadbackend(:reversediff)
+
 ## ============================================================================
 nthreads()
 name2model = Dict(
     "v3" => National.model_v3,
     "v2"        => National.model_v2,
-    #"gp"        => National.model_gp,
-    # "contacts" => National.model_contacts,
-    "contacts2" => National.model_contacts_v2,
-    "contacts3" => National.model_contacts_v3,
-    "contacts4" => National.model_contacts_v4,
-    "fitted" => National.model_contacts_fitted,
-    "const-iar" => National.model_constant_iar,
-    "const-iar-c" => National.model_constant_iar_contacts,
-    "contacts-shifted" => National.model_contacts_shifted,
     "deaths" => National.model_deaths,
     "cases" => National.model_cases,
     "hospit" => National.model_hospit,
-    "parametric-cases" => National.model_parametric_cases
 )
 #-----------------------------------------------------------------------------
 # load data
@@ -42,7 +33,7 @@ ps = (
     warmup = 10,
     steps  = 100,
     seed   = nothing,
-    observ = "2021-01-13",#"2021-02-06",#"2021-03-25"
+    observ = "2021-06-01",#"2021-01-13",#"2021-02-06",#"2021-03-25"
     cases  = "2020-06-01",
     model  = "cases",
     preds = "CF,CC,CR,CS",
@@ -53,11 +44,11 @@ fname = savename("chains", ps, "")
 @info ps
 
 data = National.load_data(;
-    observations_end  = ps.observ,
+    observationsend  = ps.observ,
     predictors        = ps.preds |> CovidSurvey.parse_predictors,
-    rw_step           = 1,
-    epidemic_start    = 30,
-    num_impute        = 6,
+    rwstep           = 1,
+    epidemicstart    = 30,
+    numimpute        = 6,
     deathmodel        = National.DeathInit(obs_stop="$( Date(ps.cases) + Day(60))"),
     casemodel         = National.CaseInit(obs_start=ps.cases),
     # hospitmodel       = National.HospitInit(obs_stop="$( Date(ps.cases) + Day(1))")
@@ -104,6 +95,10 @@ p = National.plot(data, generated_posterior);
 savefig(p, "/home/and/tmp/figures/"*fname*".html")
 # savefig(p, projectdir("figures/tmp", fname*".png") )
 run(`firefox $("/home/and/tmp/figures/"*fname*".html")`, wait=false)
+##
+using Optim
+init_vals = Float64.(vec(mean(Chains(chain, :parameters).value, dims=1)))
+mle_estimate = optimize(m, MAP(), init_vals, LBFGS(), Optim.Options(iterations=1_000, allow_f_increases=true))
 ##
 plotlyjs()
 n = filter( x->!occursin(r"\[", x), String.(names(chain)))
