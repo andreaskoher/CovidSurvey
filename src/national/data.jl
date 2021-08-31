@@ -473,10 +473,10 @@ function observables!(turing_data,
     return nothing
 end
 
-function consistent!(data; epidemic_start = 30)
+function consistent!(data; epidemicstart = 30)
     @unpack cases, hospit, deaths = data
-    data["epidemic_start"] = epidemic_start
-    s = data["startdate"]  = startdate(deaths; epidemic_start)
+    data["epidemicstart"] = epidemicstart
+    s = data["startdate"]  = startdate(deaths; epidemicstart)
     e = enddate(deaths, cases, hospit)
     data["deaths"] = limit(deaths, s, e)
     data["hospit"] = limit(hospit, s, e)
@@ -486,35 +486,35 @@ function consistent!(data; epidemic_start = 30)
     return nothing
 end
 
-function startdate(df; epidemic_start = 30)
+function startdate(df; epidemicstart = 30)
     cumulative = cumsum(df[:,:country])
     start_idx = findfirst(>=(10), cumulative)
-    return df.date[start_idx] - Day(epidemic_start)
+    return df.date[start_idx] - Day(epidemicstart)
 end
 
-function national_timeseries(dates, startdate, observations_end)
+function national_timeseries(dates, startdate, observationsend)
     is = findfirst(==(startdate), dates)
-    ie = findfirst(==(observations_end), dates)
+    ie = findfirst(==(observationsend), dates)
     return dates[is:ie]
 end
 
 function totaldays(dates, startdates)
-    observations_end = last(dates)
-    national_dates = national_timeseries(dates, startdates, observations_end)
+    observationsend = last(dates)
+    national_dates = national_timeseries(dates, startdates, observationsend)
     return length(national_dates)
 end
 
-function df2vec(df, startdate, observations_end)
+function df2vec(df, startdate, observationsend)
     vs = Vector{Vector{Int64}}()
     is = findfirst(==(startdate), df.date)
-    ie = findfirst(==(observations_end), df.date)
+    ie = findfirst(==(observationsend), df.date)
     v = vec(df[is:ie, :country])
     return v
 end
 
-function turingformat!(data, observations_end = nothing)
+function turingformat!(data, observationsend = nothing)
     @unpack dates, cases, hospit, deaths = data
-    e = data["observations_end"] = isnothing(observations_end) ? last(dates) : Date(observations_end)
+    e = data["observationsend"] = isnothing(observationsend) ? last(dates) : Date(observationsend)
     s = data["startdate"]
     data["num_tot"]       = totaldays(dates, s)
     data["dates_turing"]  = national_timeseries(dates, s, e)
@@ -574,7 +574,7 @@ function stepindex(n, stepsize)
     index
 end
 
-function randomwalk!(data, stepsize=1; covariates_kwargs)
+function randomwalk!(data, stepsize, covariates_kwargs)
     @unpack num_obs, lockdown_index, covariates_start, num_covariates = data
     n = if covariates_kwargs[:semiparametric] && data["num_covariates"] > 0
         covariates_start-lockdown_index-1
@@ -587,14 +587,14 @@ function randomwalk!(data, stepsize=1; covariates_kwargs)
     return nothing
 end
 
-function time_varying_iar!(data, casemodel, iar_step=1)
+function time_varying_iar!(data, casemodel, iarstep=1)
     @unpack num_obs, num_tot = data
     data["iar_start_idx"] = startindex(data, casemodel)
-    data["num_iar_steps"] = num_obs - data["iar_start_idx"] + 1
+    data["num_iarsteps"] = num_obs - data["iar_start_idx"] + 1
     # data["iar_idx"] = idx = stepindex(n, stepsize)
-    # data["num_iar_steps"] = length(unique(idx[1:num_obs]))
-    # iar_idx = get_iar_idx(num_tot, num_obs, cases_start_idx, iar_step)
-    # num_iar_steps = length(unique(iar_idx))
+    # data["num_iarsteps"] = length(unique(idx[1:num_obs]))
+    # iar_idx = get_iar_idx(num_tot, num_obs, cases_start_idx, iarstep)
+    # num_iarsteps = length(unique(iar_idx))
     return nothing
 end
 # ============================================================================
@@ -643,7 +643,7 @@ end
 function startindex(data, o)
     dates   = data["dates_turing"]
     if isempty(o.obs_start)
-        date = Date(data["startdate"]) + Day(data["epidemic_start"])
+        date = Date(data["startdate"]) + Day(data["epidemicstart"])
         i = findfirst(==(date), dates)
         return i
     else
@@ -705,7 +705,7 @@ function readsero(;later_dataset = true)
     return df
 end
 
-function SeroParams!(data, sero=SeroInit(); later_dataset = true)
+function SeroParams!(data, sero=SeroInit1(); later_dataset = true)
     @unpack dates_turing = data
 
     df = readsero(;later_dataset)
@@ -714,36 +714,39 @@ function SeroParams!(data, sero=SeroInit(); later_dataset = true)
     df = df[ s .<= df.date .<= e, :]
     data["seroprev"] = df
 
-    σ = df.std * population
-    uncertainty_dist = sero.dist.(σ, Ref(sero.cv))
+    # σ = df.std
+    # uncertainty_dist = sero.dist.(σ, Ref(sero.cv))
     params = (
-        mean  = df.country * population,
-        std = σ,
-        dstd  = arraydist( uncertainty_dist),
+        mean  = df.country,
+        std   = sero.std,
+        CI    = df.CI,
+        # dstd  = arraydist( uncertainty_dist),
         index = [findfirst(==(d), dates_turing) for d in df.date],
         dates = df.date,
         delay = sero.delay,
         population = population
     )
-    data["sero"] = df.country * population
-    data["seromodel"] = SeroParams5(params...)
+    data["sero"] = df.country
+    data["seromodel"] = SeroParams(params...)
 
     return nothing
 end
 
-@kwdef struct SeroInit# <: ObservationInit
+@kwdef struct SeroInit1# <: ObservationInit
     obs_start        ::String  = ""
     obs_stop         ::String  = "2020-07-01"
     delay            ::Int64   = 0
+    std              ::Float64 = 0.5
     # population       ::Int64   = National.population
-    dist                       = InverseGamma2
-    cv               ::Float64 = 0.1
+    # dist                       = InverseGamma2
+    # cv               ::Float64 = 0.1
 end
 
-struct SeroParams5{M,S,D,I,A,Y,P}
+struct SeroParams{M,S,C,I,A,Y,P}
     mean::M
     std::S
-    dstd::D
+    CIs::C
+    # dstd::D
     index::I
     dates::A
     delay::Y
@@ -766,16 +769,16 @@ end
 #
 
 function load_data(;
-    observations_end  = nothing,
+    observationsend  = nothing,
     predictors        = nothing,
-    rw_step           = 1,
-    iar_step          = 1,
-    epidemic_start    = 30,
-    num_impute        = 6,
+    rwstep           = 1,
+    iarstep          = 1,
+    epidemicstart    = 30,
+    numimpute        = 6,
     casemodel         = CaseInit(),
     hospitmodel       = HospitInit(),
     deathmodel        = DeathInit(),
-    seromodel         = SeroInit(),
+    seromodel         = SeroInit1(),
     link              = KLogistic(3.),
     invlink           = KLogit(3.),
     lockdown          = "2020-03-18",
@@ -790,13 +793,13 @@ function load_data(;
 
     data = Dict{String, Any}()
     observables!(data)
-    consistent!(data; epidemic_start)
-    turingformat!(data, observations_end)
+    consistent!(data; epidemicstart)
+    turingformat!(data, observationsend)
     # cases_start_date!(data, cases_start)
     covariates!(data, predictors; covariates_kwargs...)
     lockdown!(data, lockdown)
-    randomwalk!(data, rw_step; covariates_kwargs)
-    time_varying_iar!(data, casemodel, iar_step)
+    randomwalk!(data, rwstep, covariates_kwargs)
+    time_varying_iar!(data, casemodel, iarstep)
     ObservParams!(data, casemodel)
     ObservParams!(data, hospitmodel)
     ObservParams!(data, deathmodel)
@@ -810,13 +813,13 @@ function load_data(;
     # end
 
     turing_data = (
-        num_impute                  = num_impute,
+        num_impute                  = numimpute,
         num_total_days              = data["num_tot"],
         casemodel                   = data["casemodel"],
         cases                       = data["cases_turing"],
         deathmodel                  = data["deathmodel"],
         deaths                      = data["deaths_turing"],
-        epidemic_start              = epidemic_start,
+        epidemic_start              = epidemicstart,
         population                  = population, #denmark statistics 2020 Q4
         serial_interval             = serialinterval(15),#padzeros(serialinterval(30), 0, num_tot), #data_usa.turing_data.serial_intervals[1:50],
         num_si                      = 15,
@@ -826,7 +829,7 @@ function load_data(;
         num_rt_steps                = data["num_rt_steps"],
         rt_step_indices             = data["rt_step_index"],
         iar_start_idx               = data["iar_start_idx"],
-        num_iar_steps               = data["num_iar_steps"],
+        num_iarsteps               = data["num_iarsteps"],
         num_observations            = data["num_obs"],
         link                        = link,
         invlink                     = invlink,
@@ -854,7 +857,7 @@ function load_data(;
         predictors,
         data["seroprev"],
         lockdown,
-        data["observations_end"],
+        data["observationsend"],
         -1,
         data["startdate"]
     )

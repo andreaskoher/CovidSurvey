@@ -24,7 +24,8 @@ export
     vectup2tupvec,
     arrarrarr2arr,
     plot_confidence_timeseries,
-    plot_confidence_timeseries!
+    plot_confidence_timeseries!,
+    hpdi
 
 include("io.jl")
 include("utils.jl")           # <= stuff that might also be included by sub-modules
