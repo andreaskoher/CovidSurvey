@@ -12,7 +12,7 @@
 
 	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
-	σ_rt       ~ truncated(Normal(0.1, .05), 0, .2)
+	σ_rt       ~ truncated(Normal(0.15, .05), 0, .25)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
 
 	Rt = TV(undef, num_time_steps)
@@ -40,8 +40,8 @@
 	# infections!(newly_infected, cumulative_infected, θ, τ, y, Rt)
 	infections!(newly_infected, cumulative_infected, effective_Rt, θ, y, Rt)
 	########### 4.) derive observables
-	μ_i2d ~ truncated(Normal(20., 2.), 17, 25)
-	μ_i2c ~ truncated(Normal(4.5, 1.), 3, 7)
+	μ_i2d ~ truncated(Normal(20., 2.), 10, 25)
+	μ_i2c ~ truncated(Normal(4.5, 1.), 2, 10)
 	ifr   ~ truncated(Normal(6/1000, 3/1000), 2/1000, 10/1000)
 	# ihr   ~ truncated(Normal(1/100,1/100),.1/100,5/100)
 
@@ -115,7 +115,7 @@ end
 
 	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
-	σ_rt       ~ truncated(Normal(0.1, .05), 0, .2)
+	σ_rt       ~ truncated(Normal(0.15, .05), 0, .25)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
 
 	Rt = TV(undef, num_time_steps)
@@ -143,9 +143,9 @@ end
 	# infections!(newly_infected, cumulative_infected, θ, τ, y, Rt)
 	infections!(newly_infected, cumulative_infected, effective_Rt, θ, y, Rt)
 	########### 4.) derive observables
-	μ_i2c ~ truncated(Normal(4.5, 1.), 3, 7)
+	μ_i2c ~ truncated(Normal(4.5, 1.), 2, 10)
 	μ_i2h ~ truncated(Normal(12., 3.), 9, 16)
-	μ_i2d ~ truncated(Normal(20., 2.), 17, 25)
+	μ_i2d ~ truncated(Normal(20., 2.), 10, 25)
 	ihr   ~ truncated(Normal(1/100,1/100),.1/100,5/100)
 	ifr   ~ truncated(Normal(6/1000, 3/1000), 2/1000, 10/1000)
 
@@ -224,7 +224,7 @@ end
 
 	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
-	σ_rt       ~ truncated(Normal(0.1, .05), 0, .2)
+	σ_rt       ~ truncated(Normal(0.15, .05), 0, .25)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
 
 	Rt = TV(undef, num_time_steps)
@@ -254,9 +254,9 @@ end
 	########### 4.) derive observables
 	#1
 	# μ_i2d ~ truncated(Normal(20., 4.), 10, 30)
-	# μ_i2c ~ truncated(Normal(4.5, 1.), 3, 7)
+	# μ_i2c ~ truncated(Normal(4.5, 1.), 2, 10)
 	#2
-	μ_i2d ~ truncated(Normal(20., 2.), 17, 25)
+	μ_i2d ~ truncated(Normal(20., 2.), 10, 25)
 	μ_i2c ~ truncated(Normal(2., 1.), 0, 5)
 	iar   ~ Beta(1,10)
 	ifr   ~ truncated(Normal(6/1000, 3/1000), 2/1000, 10/1000)
@@ -276,13 +276,12 @@ end
 
 	ϕ_c  ~ truncated(InverseGamma2(80, .2), 30, Inf)
 	ϕ_d  ~ truncated(Normal(40, 10), 10, Inf)
- 	σ_s  ~ seromodel.dstd
 
     cases_observation_model = WeekdayHolidayObsModel(
         casemodel, μ_i2c, iar, ϕ_c, expected_daily_cases, weekdayeffect, holidayeffect
     )
     deaths_observation_model = SimpleObsModel(deathmodel, μ_i2d, ifr, ϕ_d, expected_daily_deaths)
-	sero_observation_model   = SimpleSeroObsModel(seromodel, σ_s, cumulative_infected)
+	sero_observation_model   = SimpleSeroObsModel2(seromodel, cumulative_infected)
 
 	expected!(cases_observation_model, newly_infected)
 	expected!(deaths_observation_model, newly_infected)
@@ -323,7 +322,7 @@ end
 	############# 2.) time varying reproduction number
 	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
-	σ_rt       ~ truncated(Normal(0.1, .05), 0, .2)
+	σ_rt       ~ truncated(Normal(0.15, .05), 0, .25)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
 	Rt = TV(undef, num_time_steps)
 	if num_covariates > 0
@@ -353,15 +352,15 @@ end
 	#1
     # μ ~ truncated(Normal(12., 1.), 9, 16)
 	#2
-	μ ~ truncated(Normal(9., 1.), 7, 11)
+	μ ~ truncated(Normal(9., 1.), 7, 15)
 	α ~ truncated(Normal(1.8/100,0.5/100),1/100,5/100)
 	ϕ ~ truncated(Normal(50, 10), 20, Inf)
-	σ_s = seromodel.std
+	# σ_s = seromodel.std
 
 
 	expected = TV(undef, num_time_steps)
 	hospit_observation_model = SimpleObsModel(hospitmodel, μ, α, ϕ, expected)
-	sero_observation_model   = SimpleSeroObsModel(seromodel, σ_s, cumulative_infected)
+	sero_observation_model   = SimpleSeroObsModel2(seromodel, cumulative_infected)
 
 	expected!(hospit_observation_model, newly_infected)
 
@@ -398,7 +397,7 @@ end
 	############# 2.) time varying reproduction number
 	R0         ~ truncated(Normal(3., 1.), 1.5, 5.)
 	R1         ~ truncated(Normal(.8, .1), .5, 1.1)
-	σ_rt       ~ truncated(Normal(0.1, .05), 0, .2)
+	σ_rt       ~ truncated(Normal(0.15, .05), 0, .25)
 	latent_Rt  ~ RandomWalk(num_rt_steps, σ_rt, invlink(R1))
 
 	Rt = TV(undef, num_time_steps)
@@ -427,14 +426,13 @@ end
 	infections!(newly_infected, cumulative_infected, effective_Rt, θ, y, Rt)
 
 	########### 4.) derive observables
-	μ ~ truncated(Normal(20., 2.), 17, 25)
+	μ ~ truncated(Normal(20., 2.), 10, 25)
 	α ~ truncated(Normal(6/1000, 3/1000), 1/1000, 10/1000)
 	ϕ ~ truncated(Normal(40, 10), 10, Inf)
-	σ_s  = seromodel.std
 
 	expected = TV(undef, num_time_steps)
 	deaths_observation_model = SimpleObsModel(deathmodel, μ, α, ϕ, expected)
-	sero_observation_model   = SimpleSeroObsModel(seromodel, σ_s, cumulative_infected)
+	sero_observation_model   = SimpleSeroObsModel2(seromodel, cumulative_infected)
 	expected!(deaths_observation_model, newly_infected)
 
 	########### 4.) compare model to observations
