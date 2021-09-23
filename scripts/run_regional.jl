@@ -78,7 +78,7 @@ argtable = ArgParseSettings(
         default = ""
     "--include-early-dynamics", "-i"
         arg_type = Bool
-        default = true
+        default = false
     "--semiparametric", "-S"
         arg_type = Bool
         default = true
@@ -106,7 +106,7 @@ data_params = (
     , invlink           = KLogit(4.5)
     , covariates_kwargs = Dict(
       :fname => [normpath( projectdir("data"), "mean_contact_rates_region=$r.csv" ) for r in 1:Regional.nregions],
-      :mobility => [projectdir("data/google/mobility_region=$(Regional.regions[i]).csv") for i in 1:Regional.nregions],
+      :mobility => [projectdir("data/mobility/mobility_region=$(Regional.regions[i]).csv") for i in 1:Regional.nregions],
       :semiparametric => parsed_args["semiparametric"],
       :shift          => -1,
       :startdate      => "2020-11-10", # >= 1000 cases / day
@@ -159,9 +159,9 @@ m();
 @time chain = let
     thinning = 10
     if ps.chains > 1
-        sample(m, NUTS(ps.warmup, 0.95; max_depth=7), MCMCThreads(), ps.steps + ps.warmup, ps.chains; progress=true, thinning)
+        sample(m, NUTS(ps.warmup, 0.95; max_depth=6), MCMCThreads(), ps.steps + ps.warmup, ps.chains; progress=true, thinning)
     else
-        sample(m, NUTS(ps.warmup, 0.95; max_depth=7), ps.steps + ps.warmup; progress=true, thinning) #; max_depth=15
+        sample(m, NUTS(ps.warmup, 0.95; max_depth=6), ps.steps + ps.warmup; progress=true, thinning) #; max_depth=15
     end
 end
 ## ==========================================================================

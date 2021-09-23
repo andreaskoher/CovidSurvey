@@ -31,7 +31,7 @@ argtable = ArgParseSettings(
     "--plot-results", "-p"
         help = "plot and display with firefox"
         arg_type = Bool
-        default = true
+        default = false
     "--warmup", "-w"
         help = "set nr. of warmup samples"
         arg_type = Int64
