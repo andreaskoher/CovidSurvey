@@ -7,14 +7,13 @@ struct RandomWalk{Tn, Ts, Tx} <: ContinuousMultivariateDistribution
 end
 RandomWalk(n) = RandomWalk(n, 1., 0.)
 
-
 Distributions.rand(rng::AbstractRNG, d::RandomWalk{Tn, Ts, Tx}) where {Tn, Ts, Tx} = begin
     x = Vector{Tx}(undef, d.n)
-    Distributions._rand!(rng, x, d)
+    Distributions._rand!(rng, d, x)
     return x
 end
 
-Distributions._rand!(rng::AbstractRNG, x::AbstractVector, d::RandomWalk) = begin
+Distributions._rand!(rng::AbstractRNG, d::RandomWalk, x::AbstractVector) = begin
 	x[1] = rand(Normal(d.x0, d.s))
 	for i in 2:d.n
 		x[i] = rand(Normal(x[i-1], d.s))
@@ -29,6 +28,7 @@ Distributions.logpdf(
 	ℓ += logpdf( MvNormal( d.n-1, d.s ), diff(x) )
 	return ℓ
 end
+Distributions._logpdf( d::RandomWalk, x::AbstractVector) = logpdf( d, x)
 
 Bijectors.bijector(d::RandomWalk) = Bijectors.Identity{1}()
 
@@ -38,6 +38,45 @@ Bijectors.bijector(
 
 
 Base.length(d::RandomWalk) = d.n
+
+# =============================================================================
+
+struct RandomWalk0{Tn} <: ContinuousMultivariateDistribution
+    n::Tn
+end
+
+Distributions.rand(rng::AbstractRNG, d::RandomWalk0) = zeros(d.n)
+
+Distributions.logpdf(
+    d::RandomWalk0{Tn}, x::AbstractVector{T}
+) where {Tn, T} = begin
+	ℓ  = logpdf( Normal(zero(T), one(T)), first(x) )
+	ℓ += logpdf( MvNormal( d.n-1, one(T) ), diff(x) )
+	return ℓ
+end
+
+Bijectors.bijector(d::RandomWalk0) = Bijectors.Identity{1}()
+
+Bijectors.bijector(
+    ::DistributionsAD.VectorOfMultivariate{Continuous, RandomWalk0{Tn}, Vector{RandomWalk0{Tn}}}
+) where {Tn} = Bijectors.Identity{2}()
+
+
+Base.length(d::RandomWalk0) = d.n
+
+# =============================================================================
+
+struct CustomMvNormal1{T,N} <: ContinuousMultivariateDistribution
+    dist::T
+	n::N
+end
+CustomMvNormal1(m,s,l,u,n) = CustomMvNormal1( filldist(truncated(Normal(m, s), l, u), n), n)
+
+Distributions.rand(rng::AbstractRNG, d::CustomMvNormal1) = ones(d.n) # sample in [0, 1]
+Distributions.logpdf(d::CustomMvNormal1, x::AbstractVector{<:Real}) = logpdf(d.dist, x)
+Bijectors.bijector(d::CustomMvNormal1) = Bijectors.bijector(d.dist)
+# Distributions._logpdf(d::CustomMvNormal1, x::Real) = Distributions._logpdf(Normal(d.m, d.s), x)
+# Distributions.cdf(d::CustomNormal, x::Real) = cdf(Normal(d.m, d.s), x)
 
 # ==============================================================================
 """
@@ -290,11 +329,16 @@ short2long = Dict(
     :SE => "self_efficay",
     :RC => "response_cost",
     :RE => "response_efficacy",
-    :MRES => "residential",
-    :MNRES => "nonresidential",
-	:MR => "retail",
-	:MG => "grocery",
-	:MW => "workplaces",
+    :MGRES => "google_residential",
+    :MG => "google",
+	:MGR => "google_retail",
+	:MGG => "google_grocery",
+	:MGW => "google_workplaces",
+	:MA => "apple",
+	:MAD => "apple_driving",
+	:MAW => "apple_walking",
+	:MAT => "apple_transit",
+	:MAG => "applegoogle",
     :L  => "lockdown",
     :CR => "friends",
     :CC => "colleagues",
