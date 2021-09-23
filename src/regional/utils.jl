@@ -6,7 +6,7 @@ function firefox(p; fname="tmp.html", fdir=normpath(homedir(), ".tmp"))
     return p
 end
 
-struct WeekdayHolidayObsModel{T,M,A,P,E,W,H,V} <: ObservationsModel
+struct WeekdayHolidayObsModel{T,M,A,P,E,W,H,V} <: CovidSurvey.ObservationsModel
     ps::T
     μ::M
     α::A
@@ -17,7 +17,7 @@ struct WeekdayHolidayObsModel{T,M,A,P,E,W,H,V} <: ObservationsModel
 	vectorize::V
 end
 
-struct SimpleObsModel{T,M,A,P,E,V} <: ObservationsModel
+struct SimpleObsModel{T,M,A,P,E,V} <: CovidSurvey.ObservationsModel
     ps::T
     μ::M
     α::A
@@ -26,7 +26,7 @@ struct SimpleObsModel{T,M,A,P,E,V} <: ObservationsModel
 	vectorize::V
 end
 
-struct SimpleObsModel2{T,M,S,A,P,E,V} <: ObservationsModel
+struct SimpleObsModel2{T,M,S,A,P,E,V} <: CovidSurvey.ObservationsModel
     ps::T
     μ::M
 	σ::S
@@ -35,49 +35,74 @@ struct SimpleObsModel2{T,M,S,A,P,E,V} <: ObservationsModel
 	expecteds::E
 	vectorize::V
 end
+
+rescale(xs, σ, μs) = @. xs * σ + μs'
 # ============================================================================
 # random walk model
-# function random_walks!(Rts, θ, predict, latent_Rts, R0s, σ_rt)
-# 	@unpack num_regions, rt_step_indices, lockdown_indices, num_observations, link, include_early_dynamic = θ
-#
-# 	for m in 1:num_regions
-# 		rt_step_index = rt_step_indices[m]
-# 		Rt            = Rts[m]
-# 		lockdown      = lockdown_indices[m]
-# 		num_obs       = num_observations[m]
-# 		latent_Rt     = latent_Rts[m]
-# 		R0            = R0s[m]
-#
-# 		if include_early_dynamic
-# 			Rt[1:num_obs] = link.(latent_Rt[rt_step_index])
-# 		else
-# 			Rt[1:lockdown] .= R0
-# 			Rt[lockdown+1:num_obs] = link.(latent_Rt[rt_step_index])
-# 		end
-# 		if predict
-# 			Rt[num_obs+1:end] .= Rt[num_obs]
-# 		end
-# 	end
-# end
-
-function random_walks!(Rts, θ, predict, latent_Rts, R0s)
-	@unpack num_regions, rt_step_indices, lockdown_indices, num_observations, link = θ
+function random_walks!(Rts, θ, predict, latent_Rts::AbstractVector, R0s, σ_rt)
+	@unpack num_regions, rt_step_indices, lockdown_indices, num_observations, link, include_early_dynamic = θ #include_early_dynamic
 
 	for m in 1:num_regions
 		rt_step_index = rt_step_indices[m]
 		Rt            = Rts[m]
 		lockdown      = lockdown_indices[m]
 		num_obs       = num_observations[m]
-		latent_Rt     = latent_Rts[:,m]
+		latent_Rt     = latent_Rts[m]#latent_Rts[:,m] #include_early_dynamic ? latent_Rts[m] : latent_Rts[:,m]
 		R0            = R0s[m]
 
-		Rt[1:lockdown] .= R0
-		Rt[lockdown+1:num_obs] = link.(latent_Rt[rt_step_index])
+		if include_early_dynamic
+			Rt[1:num_obs] = link.(latent_Rt[rt_step_index])
+		else
+			Rt[1:lockdown] .= R0
+			Rt[lockdown+1:num_obs] = link.(latent_Rt[rt_step_index])
+		end
 		if predict
 			Rt[num_obs+1:end] .= Rt[num_obs]
 		end
 	end
 end
+
+function random_walks!(Rts, θ, predict, latent_Rts::AbstractMatrix, R0s, σ_rt)
+	@unpack num_regions, rt_step_indices, lockdown_indices, num_observations, link, include_early_dynamic = θ
+
+	for m in 1:num_regions
+		rt_step_index = rt_step_indices[m]
+		Rt            = Rts[m]
+		lockdown      = lockdown_indices[m]
+		num_obs       = num_observations[m]
+		latent_Rt     = latent_Rts[:,m] #include_early_dynamic ? latent_Rts[m] : latent_Rts[:,m]
+		R0            = R0s[m]
+
+		if include_early_dynamic
+			Rt[1:num_obs] = link.(latent_Rt[rt_step_index])
+		else
+			Rt[1:lockdown] .= R0
+			Rt[lockdown+1:num_obs] = link.(latent_Rt[rt_step_index])
+		end
+		if predict
+			Rt[num_obs+1:end] .= Rt[num_obs]
+		end
+	end
+end
+
+# function random_walks!(Rts, θ, predict, latent_Rts, R0s)
+# 	@unpack num_regions, rt_step_indices, lockdown_indices, num_observations, link = θ
+#
+# 	for m in 1:num_regions
+# 		rt_step_index = rt_step_indices[m]
+# 		Rt            = Rts[m]
+# 		lockdown      = lockdown_indices[m]
+# 		num_obs       = num_observations[m]
+# 		latent_Rt     = latent_Rts[:,m]
+# 		R0            = R0s[m]
+#
+# 		Rt[1:lockdown] .= R0
+# 		Rt[lockdown+1:num_obs] = link.(latent_Rt[rt_step_index])
+# 		if predict
+# 			Rt[num_obs+1:end] .= Rt[num_obs]
+# 		end
+# 	end
+# end
 
 # ============================================================================
 # semi-parametric model
@@ -89,7 +114,7 @@ function semiparametric!(Rts, θ, predict, latent_Rts, R0s, σ_rt, effects)
 		lockdown      = lockdown_indices[m]
 		rt_step_index = rt_step_indices[m]
 		num_obs       = num_observations[m]
-		latent_Rt     = latent_Rts[m]
+		latent_Rt     = include_early_dynamic ? latent_Rts[m] : latent_Rts[:,m] #latent_Rts[m]
 		R0            = R0s[m]
 		num_total     = num_total_days[m]
 		covariate     = covariates[m]
@@ -134,10 +159,10 @@ function mixed!(Rts, θ, predict, latent_Rts, R0s, σ_rt, effects)
 
 	for m in 1:num_regions
 		Rt               = Rts[m]
-		lockdown         = lockdown_indices[m]
+		lockdown_index         = lockdown_indices[m]
 		rt_step_index    = rt_step_indices[m]
 		num_obs          = num_observations[m]
-		latent_Rt        = latent_Rts[m]
+		latent_Rt        = include_early_dynamic ? latent_Rts[m] : latent_Rts[:,m]#latent_Rts[m]
 		R0               = R0s[m]
 		num_total        = num_total_days[m]
 		covariate        = covariates[m]
@@ -153,7 +178,7 @@ function mixed!(Rts, θ, predict, latent_Rts, R0s, σ_rt, effects)
 				Rt[i] = link(latent_Rt[rt_step_index[i]] + predictor[j])
 			end
 		else
-			Rt[1:lockdown] .= R0
+			Rt[1:lockdown_index] .= R0
 			for (j,i) in enumerate(lockdown_index+1:covariates_start-1)
 				Rt[i] = link(latent_Rt[rt_step_index[j]])
 			end
@@ -212,7 +237,7 @@ function initepidemic!(newly_infected, cumulative_infected, θ, regionaldata)
 	for t in 2:num_impute
 		newly_infected[t] = y
 		cumulative_infected[t] = cumulative_infected[t-1] + y
-		St = max(population - cumulative_infected[t], 0) / population
+		# St = max(population - cumulative_infected[t], 0) / population
 	end
 end
 
@@ -223,15 +248,22 @@ function runepidemic!(newly_infected, cumulative_infected, effective_Rts, θ, re
 
 	for t = (num_impute + 1):num_time_step
 		# Update cumulatively infected
-		cumulative_infected[t] = cumulative_infected[t-1] + newly_infected[t - 1]
+		C = cumulative_infected[t] = cumulative_infected[t-1] + newly_infected[t - 1]
+		susceptible = max(population - C, 0)
+
 		# Adjusts for portion of population that is susceptible
-		St = max(population - cumulative_infected[t], 0) / population
+		#St = max(population - cumulative_infected[t], 0) / population
 		# effective number of infectious individuals
 		effectively_infectious = sum(newly_infected[τ] * serial_interval[t - τ] for τ = (t - 1):-1:max(t-num_si,1))
 
-		effective_Rt[t] = St * Rt[t]
+		unadjusted_new_infections = effectively_infectious * Rt[t]
+
 		# number of new infections (unobserved)
-		newly_infected[t] = effective_Rt[t] * effectively_infectious
+		# newly_infected[t] = susceptible * (1 - exp(- unadjusted_new_infections / population))
+		newly_infected[t] = susceptible * (1 - exp(- unadjusted_new_infections / population))
+		# newly_infected[t] = effective_Rt[t] * effectively_infectious
+
+		effective_Rt[t] = susceptible / population * Rt[t]
 	end
 end
 
@@ -242,14 +274,18 @@ function runepidemic!(newly_infected, cumulative_infected, θ, regionaldata)
 
 	for t = (num_impute + 1):num_time_step
 		# Update cumulatively infected
-		cumulative_infected[t] = cumulative_infected[t-1] + newly_infected[t - 1]
+		C = cumulative_infected[t] = cumulative_infected[t-1] + newly_infected[t - 1]
+		susceptible = max(population - C, 0)
+
 		# Adjusts for portion of population that is susceptible
-		St = max(population - cumulative_infected[t], 0) / population
-		# effective number of infectious individuals
 		effectively_infectious = sum(newly_infected[τ] * serial_interval[t - τ] for τ = (t - 1):-1:max(t-num_si,1))
 
+		unadjusted_new_infections = effectively_infectious * Rt[t]
+
 		# number of new infections (unobserved)
-		newly_infected[t] = St * Rt[t] * effectively_infectious
+		# newly_infected[t] = susceptible * (1 - exp(- unadjusted_new_infections / population))
+		newly_infected[t] = susceptible * (1 - exp(- unadjusted_new_infections / population))
+
 	end
 	return nothing
 end
@@ -285,9 +321,10 @@ function expected!(obsmodel::Union{SimpleObsModel, SimpleObsModel2}, newly_infec
 		newly_infected = newly_infecteds[m]
 		num_time_step  = length(expected)
 
-		expected[1] = 1e-15 * newly_infected[1]
+		expected[1] = 1e-15*newly_infected[1]
 		for t = 2:num_time_step
 			expected[t] = α * sum(newly_infected[τ] * i2o[t - τ] for τ = (t - 1):-1:max(t-delay_length,1))
+			# expected[t] = α * sum(newly_infected[τ] * i2o[t - τ] for τ = (t - 1):-1:max(t-delay_length,1))
 		end
 	end
 	return nothing
@@ -307,7 +344,7 @@ function expected!(obsmodel::WeekdayHolidayObsModel, newly_infecteds)
 		holiday        = holidays[m]
 		weekday        = weekdays[m]
 
-		expected[1] = 1e-15 * newly_infected[1]
+		expected[1] = 1e-15*newly_infected[1]
 		for t = 2:num_time_step
 			weekday_holiday_effect = (1 - holidayeffect * holiday[t]) * weekdayeffect[weekday[t]]
 			expected[t] = α * weekday_holiday_effect * sum(newly_infected[τ] * i2o[t - τ] for τ = (t - 1):-1:max(t-delay_length,1))
@@ -340,7 +377,7 @@ function _prediction(ys, μs, ϕ)
 	return ℓ
 end
 
-function Turing.logpdf(obsmodel::ObservationsModel, observed)
+function Turing.logpdf(obsmodel::CovidSurvey.ObservationsModel, observed)
 	@unpack ps, ϕ, expecteds, vectorize = obsmodel
 	@unpack populations, starts, stops, num_regions = ps
 
@@ -362,7 +399,7 @@ function Turing.logpdf(obsmodel::ObservationsModel, observed)
 		μs = expecteds[m][ts]
 		ys = observed[m][ts]
 
-		_out_of_bounds(μs, populations[m]) && (@warn "out of bounds"; return T(Inf))
+		#_out_of_bounds(μs, populations[m]) && (@warn "out of bounds"; return T(Inf))
 		ℓ += _logpdf(ys, μs, ϕ)
 	end
 	return ℓ
@@ -372,7 +409,7 @@ _out_of_bounds(x, upper_lim) = !all(@. 0. < x < upper_lim )
 
 # ============================================================================
 # pointwise_loglikelihoods
-function Turing.pointwise_loglikelihoods(obsmodel::ObservationsModel, observed)
+function Turing.pointwise_loglikelihoods(obsmodel::CovidSurvey.ObservationsModel, observed)
 	@unpack ps, ϕ, expecteds, vectorize = obsmodel
 	@unpack populations, starts, stops, num_regions = ps
 
@@ -390,13 +427,14 @@ end
 
 # ============================================================================
 # predictions
-function prediction(obsmodel::ObservationsModel)
+function prediction(obsmodel::CovidSurvey.ObservationsModel)
 	@unpack ps, ϕ, expecteds = obsmodel
 	@unpack starts, stops, num_regions = ps
 
 	ys = Vector{Float64}[]
 	for m in 1:num_regions
 		μs = expecteds[m]
+		μs[μs .< 1e-2] .= 1e-2
 		y = [ rand(NegativeBinomial2(μ, ϕ)) for μ in μs ]
 		push!(ys, y)
 	end
@@ -416,7 +454,7 @@ end
 # ============================================================================
 # observe sero positive
 
-struct SimpleSeroObsModel{T,E}# <: ObservationsModel
+struct SimpleSeroObsModel{T,E}# <: CovidSurvey.ObservationsModel
     ps::T
 	expecteds::E
 end
@@ -619,12 +657,17 @@ end
 
 function generate_posterior(p::PostProcessing2)
 	@unpack fdir, ps, ignores, chain, model, data = p
-	chains_params = Turing.MCMCChains.get_sections(chain, :parameters)
-	generated_posterior = Regional.posterior(model, data.turing_data, chains_params)
-    fname = normpath( fdir, savename(ps.prefix*"GENERATED-QUANTITIES", ps, "bson"; ignores) )
-    dic = Dict( zip( keys(generated_posterior), values(generated_posterior) ) )
-    bson( fname ,  dic )
-	return generated_posterior
+	fname = normpath( fdir, savename(ps.prefix*"GENERATED-QUANTITIES", ps, "bson"; ignores) )
+	if isfile(fname)
+		return BSON.load(fname) |> NamedTuple
+	else
+		chains_params = Turing.MCMCChains.get_sections(chain, :parameters)
+		generated_posterior = Regional.posterior(model, data.turing_data, chains_params)
+	    fname = normpath( fdir, savename(ps.prefix*"GENERATED-QUANTITIES", ps, "bson"; ignores) )
+	    dic = Dict( zip( keys(generated_posterior), values(generated_posterior) ) )
+	    bson( fname ,  dic )
+		return generated_posterior
+	end
 end
 
 function plot_regions(p, gp; plot_results = false)
@@ -678,7 +721,8 @@ function ArviZ.plot_autocorr(p::PostProcessing2; plot_results = false)
 	    x-> !occursin("latent_Rts", x) &&
 	        !occursin("effect", x)     &&
 	        !occursin("ys", x)     &&
-	        !occursin("R0", x), String.(names(c))
+	        !occursin("R0", x) &&
+			!occursin("R1", x), String.(names(c))
 	)
 	ArviZ.plot_autocorr(c; var_names=n);
 	fname = normpath( fdir, savename(ps.prefix*"FIG-AUTOCORR", ps, "png"; ignores) )
@@ -694,7 +738,8 @@ function ArviZ.plot_pair(p::PostProcessing2; plot_results = false)
 	    x-> !occursin("latent_Rts", x) &&
 	        !occursin("effect", x)     &&
 	        !occursin("ys", x)     &&
-	        !occursin("R0", x), String.(names(c))
+	        !occursin("R0", x) &&
+			!occursin("R1", x), String.(names(c))
 	)
 	idata = from_mcmcchains(
 		chain;
@@ -723,7 +768,7 @@ function relative_Rt_change(x, pp::Regional.PostProcessing2, args...; R0 = 1)
     @assert R0 == 1 #otherwise check regional_effect_estimation.jl
 
     @_ sampled_effects(args...) |>
-        f.(invf(R0) .+ __ * x) |>
+        f.(invf(float(R0)) .+ __ * x) |>
         @. ( __ / R0 - R0 ) * 100
 end
 
@@ -755,10 +800,15 @@ function effect_quantiles(pp::Regional.PostProcessing2, gp; effect_on_Rt=0)
         push!(data, [q..., p, r])
     end
 
-    DataFrame(
-        (median=m, lower95=ll, lower50=l, upper50=u, upper95=uu, predictor=p, region=r)
-        for (ll, l, m, u, uu, p, r) in data
-    )
+	DataFrame(
+		lower95 = getindex.(data, 1),
+		lower50 = getindex.(data, 2),
+	    median = getindex.(data, 3),
+	    upper50 = getindex.(data, 4),
+	    upper95 = getindex.(data, 5),
+	    predictor = getindex.(data, 6),
+	    region = getindex.(data, 7),
+	)
 end
 
 # ==========================================================================
@@ -846,7 +896,7 @@ end
 
 function plot_effects(pp::PostProcessing2, gp; plot_results = true, grouped = false, effect_on_Rt = 0.)
 	@unpack fdir, ps, ignores, chain = pp
-	effects = effect_quantiles(pp, gp)
+	effects = effect_quantiles(pp, gp; effect_on_Rt)
 
 	suffix = "-EFFECTS"
 	suffix = grouped ? suffix *= "-GROUPED" : suffix *= "-REGIONAL"
@@ -854,7 +904,7 @@ function plot_effects(pp::PostProcessing2, gp; plot_results = true, grouped = fa
 	xlabel = effect_on_Rt == 0 ? "effect size" : "change in Rt [\\%]"
 	plot_effects = grouped ? plot_grouped_effects : plot_regional_effects
 
-	fname = normpath( fdir, savename(ps.prefix*"FIG"*suffix, ps, "png"; ignores) )
+	fname = normpath( fdir, savename(ps.prefix*"FIG"*suffix, ps, "html"; ignores) )
 	p = plot_effects(effects; xlabel)
 	savefig(p, fname )
 	plot_results && (display(p); run(`firefox $(fname)`, wait=false))
@@ -895,7 +945,7 @@ function postprocessing(fname; plot_results = false, exclude = [], warmup = noth
     @info "load data"
     fdir, ps, ignores = parse_fname(fname; warmup)
 	p = PostProcessing2(fdir, ps, ignores, exclude, fname)
-	savechain(p)
+	#savechain(p)
     ## ==========================================================================
     @info "plot chain"
     plot_chains(p; plot_results)
@@ -907,14 +957,14 @@ function postprocessing(fname; plot_results = false, exclude = [], warmup = noth
 	p = skip_warmup(p)
 	diagnostics(p)
 	## ==========================================================================
-	@info "plot autocorr"
-	plot_autocorr(p; plot_results)
+	@info "make predictions"
+	gp = generate_posterior(p)
 	## ==========================================================================
-	@info "plot pairs"
-	plot_pair(p; plot_results)
+	# @info "plot autocorr"
+	# plot_autocorr(p; plot_results)
 	## ==========================================================================
-    @info "make predictions"
-    gp = generate_posterior(p)
+	# @info "plot pairs"
+	# plot_pair(p; plot_results)
     ## ==========================================================================
     @info "plot regions"
     plot_regions(p, gp; plot_results)
@@ -922,10 +972,10 @@ function postprocessing(fname; plot_results = false, exclude = [], warmup = noth
     @info "plot rt"
     plot_rt(p, gp; plot_results)
 	## ==========================================================================
-	if !isempty(p.data.predictors)
+	if p.data.turing_data.num_covariates > 0
 		@info "plot predictors"
-		pgfplotsx()
-		default(titlefontsize = 20, legendfontsize = 18, labelfontsize = 18, guidefontsize = 18, tickfontsize = 12, framestyle = :zerolines, yminorgrid = true)
+		# pgfplotsx()
+		# default(titlefontsize = 20, legendfontsize = 18, labelfontsize = 18, guidefontsize = 18, tickfontsize = 12, framestyle = :zerolines, yminorgrid = true)
 
 		Regional.plot_effects(p, gp; plot_results, grouped = false, effect_on_Rt = 0.)
 		Regional.plot_effects(p, gp; plot_results, grouped = false, effect_on_Rt = 2.)
@@ -934,8 +984,8 @@ function postprocessing(fname; plot_results = false, exclude = [], warmup = noth
 		Regional.plot_effects(p, gp; plot_results, grouped = true, effect_on_Rt = 0.)
 		Regional.plot_effects(p, gp; plot_results, grouped = true, effect_on_Rt = 2.)
 		Regional.plot_effects(p, gp; plot_results, grouped = true, effect_on_Rt = -0.5)
-		plotlyjs()
-		default()
+		# plotlyjs()
+		# default()
 	end
     # -----------------------------------------------------------------------------
     @info "store reproduction number"

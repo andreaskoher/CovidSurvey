@@ -79,7 +79,7 @@ function predicted(data, gp, region, label)
     end
 end
 
-function startdate(data::Regional.Data, region, label::String)
+function startdate(data::CovidSurvey.Data, region, label::String)
     @assert label in ["cases", "hospitalizations", "deaths"]
     i = region isa Integer ? region : findfirst(==(region), data.regions)
     s = if label == "cases"
@@ -92,7 +92,7 @@ function startdate(data::Regional.Data, region, label::String)
     return data.dates[i][s]
 end
 
-function enddate(data::Regional.Data, region, label::String)
+function enddate(data::CovidSurvey.Data, region, label::String)
     @assert label in ["cases", "hospitalizations", "deaths"]
     i = region isa Integer ? region : findfirst(==(region), data.regions)
     s = if label == "cases"
@@ -105,7 +105,7 @@ function enddate(data::Regional.Data, region, label::String)
     return data.dates[i][s]
 end
 
-function ObservationPlottingRecipe1(data::Regional.Data, gp, region, label)
+function ObservationPlottingRecipe1(data::CovidSurvey.Data, gp, region, label)
     e = expected(data, gp, region, label)
     o = observed(data, region, label)
     p = predicted(data, gp, region, label)
@@ -177,7 +177,7 @@ struct SeroPlottingRecipe1{SD, ED, E, O, L} <: Regional.PlottingRecipe
     label     ::L
 end
 
-function SeroPlottingRecipe1(data::Regional.Data, gp, region, label)
+function SeroPlottingRecipe1(data::CovidSurvey.Data, gp, region, label)
     @unpack dates, means, CIs, delay, populations = data.turing_data.seromodel
     i  = region isa Integer ? region : findfirst(==(region), data.regions)
     sd = first(data.dates[i])# startdate(data, region, "hospitalizations")
@@ -236,7 +236,7 @@ struct RtWithPredictorsPlottingRecipe1{Tlo, Tst, Ted, Te, Tl, Psd} <: Regional.P
     pstartdate::Psd
 end
 
-function RtPlottingRecipe1(data::Regional.Data, generated_posterior, region, label)
+function RtPlottingRecipe1(data::CovidSurvey.Data, generated_posterior, region, label)
     i  = region isa Integer ? region : findfirst(==(region), data.regions)
     dates      = data.dates[i]
     values     = generated_posterior.Rts[i]
@@ -322,7 +322,7 @@ posterior2label = OrderedDict(
     :expected_seropos      => "total infected"
 )
 
-function RegionPlottingRecipe(data::Data, generated_posterior, region)
+function RegionPlottingRecipe(data::CovidSurvey.Data, generated_posterior, region)
     ks = keys(generated_posterior)
     recipes = Vector{PlottingRecipe}()
     titles  = Vector{String}()
@@ -349,9 +349,9 @@ function Plots.plot(r::RegionPlottingRecipe; kwargs...)
     plot(plots..., layout=(nplots,1), size=(1000, nplots*250), sharex=true, link=:x)
 end
 
-# Plots.plot(data::Data, generated_posterior) =
+# Plots.plot(data::CovidSurvey.Data, generated_posterior) =
 #     plot( RegionPlottingRecipe(data, generated_posterior) )
-# Plots.plot(data::Data, generated_posterior) = plot!(plot(), data, generated_posterior)
+# Plots.plot(data::CovidSurvey.Data, generated_posterior) = plot!(plot(), data, generated_posterior)
 
 # ============================================================================
 # reproduction number for all regions
@@ -364,7 +364,7 @@ struct RtsPlottingRecipe{Tlo, Tsd, Ted, Tre, Te} <: Regional.PlottingRecipe
     expecteds ::Te
 end
 
-function RtsPlottingRecipe(data::Regional.Data, generated_posterior)
+function RtsPlottingRecipe(data::CovidSurvey.Data, generated_posterior)
     dates      = data.dates
     samples    = generated_posterior.Rts
     expecteds  = [(dates = d, values = g) for (d,g) in zip(dates, samples)]
@@ -396,7 +396,7 @@ struct RegionsOverviewPlottingRecipe{Tr,Tt,T} <: Regional.PlottingRecipe
 end
 
 
-function RegionsOverviewPlottingRecipe(data::Data, generated_posterior, posterior)
+function RegionsOverviewPlottingRecipe(data::CovidSurvey.Data, generated_posterior, posterior)
     # i  = region isa Integer ? region : findfirst(==(region), data.regions)
     recipes = Vector{PlottingRecipe}()
     titles  = Vector{String}()
@@ -442,7 +442,7 @@ end
 #     expected  ::Te
 # end
 #
-# function SingleRtPlottingRecipe1(data::Regional.Data, generated_posterior, region)
+# function SingleRtPlottingRecipe1(data::CovidSurvey.Data, generated_posterior, region)
 #     i  = region isa Integer ? region : findfirst(==(region), data.regions)
 #     dates      = data.dates[i]
 #     values     = generated_posterior.Rts[i]
@@ -485,7 +485,7 @@ end
 #     :Rts                    => "effective reproduction number"
 # )
 #
-# function RegionPlottingRecipe(data::Regional.Data, generated_posterior, region)
+# function RegionPlottingRecipe(data::CovidSurvey.Data, generated_posterior, region)
 #     ks = keys(generated_posterior)
 #     recipes = Vector{Regional.PlottingRecipe}()
 #     titles  = Vector{String}()

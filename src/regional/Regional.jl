@@ -30,9 +30,6 @@ using Underscores
 # using QuadGK
 # using
 
-abstract type ObservationInit end
-abstract type ObservationsModel end
-
 using ..CovidSurvey#: NegativeBinomial2
 
 include("models.jl")

@@ -838,7 +838,8 @@ function load_data(;
         num_covariates              = data["num_covariates"],
         covariates                  = data["covariates"],
         covariates_start            = data["covariates_start"],
-        semiparametric              = covariates_kwargs[:semiparametric]
+        semiparametric              = covariates_kwargs[:semiparametric],
+        rwscale                     = sqrt(rwstep),
         # seroprev_mean               = data["seroprev_mean"],
         # seroprev_std                = data["seroprev_std"],
         # seroprev_idx                = data["seroprev_idx"],
