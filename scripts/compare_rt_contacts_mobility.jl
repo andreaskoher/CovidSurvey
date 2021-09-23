@@ -96,7 +96,8 @@ function load_regional_data(i; kwargs...)
     hospit = observables["hospit"]
     cases = observables["cases"]
 
-    fname = projectdir("reports/2021-08-01/Rt-$(uppercase(Regional.regions[i]))_chains=10_epidemicstart=10_folder=2021-08-01_model=cases_numimpute=6_rwstep=1_steps=100_warmup=500.csv")
+    # fname = projectdir("reports/2021-08-01/Rt-$(uppercase(Regional.regions[i]))_chains=10_epidemicstart=10_folder=2021-08-01_model=cases_numimpute=6_rwstep=1_steps=100_warmup=500.csv")
+    fname = projectdir("/home/and/dev/CovidSurvey/reports/regional_prediction_end_of_peak/2021-09-01/Rt-$(uppercase(Regional.regions[i]))_chains=10_model=hospit_observ=2021-03-01_regional=true_rwstep=1_semipar=true_std=false_steps=1000_warmup=1000.csv")
     rt = CSV.File(fname) |> DataFrame
     rename!(rt, "dates"=>"date")
 
@@ -105,7 +106,7 @@ function load_regional_data(i; kwargs...)
     surv = CSV.File(fname) |> DataFrame
     "dates" in names(surv) && rename!(surv, "dates"=>"date")
 
-    fname = projectdir("data/google/mobility_region=$(Regional.regions[i]).csv")
+    fname = projectdir("data/mobility/mobility_region=$(Regional.regions[i]).csv")
     mobil = CSV.File(fname) |> DataFrame
 
     return conform(cases, hospit, rt, surv, mobil; kwargs...)
@@ -115,7 +116,7 @@ end
 for (i,r) in enumerate(Regional.regions)
     data  = load_regional_data(i; stopdate="2021-02-01")
     p     = plot_comparison( data...; column=Regional.regions[i])
-    fname = "figures/compare_rt_meansurvey_mobility_REGION=$(uppercase(r)).html"
+    fname = "/home/and/.tmp/compare_rt_meansurvey_mobility_REGION=$(uppercase(r)).html"
     savefig(p, projectdir(fname))
     run(`firefox $fname`, wait=false)
 end
@@ -154,3 +155,5 @@ for (i,r) in enumerate(Regional.regions)
     savefig(p, projectdir(fname))
     run(`firefox $fname`, wait=false)
 end
+
+## =============================================================================
