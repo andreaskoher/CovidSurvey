@@ -10,6 +10,12 @@ using DistributionsAD
 using Random: AbstractRNG
 import Bijectors
 
+using DataFrames
+using Base:@kwdef
+
+abstract type ObservationInit end
+abstract type ObservationsModel end
+
 export
     National,
     Regional,
@@ -30,6 +36,7 @@ export
 include("io.jl")
 include("utils.jl")           # <= stuff that might also be included by sub-modules
 include("visualizations.jl")   # <= visualization stuff
+include("data.jl")
 
 # Simulations on a national level
 include("national/National.jl")
