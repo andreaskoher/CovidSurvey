@@ -8,18 +8,22 @@ using DataFrames
 using Underscores
 using CSV
 using HTTP, JSON
+using BSON
 using Dates
 ## ============================================================================
 #                    apple
 #  ============================================================================
-old2new_names = Dict(
-    "Capital Region of Denmark" => "capital",
-    "Central Denmark Region" => "central",
-    "North Denmark Region" => "north",
-    "Region Zealand" => "zealand",
-    "Region of Southern Denmark" => "south"
+regions = ["Hungary", "United Kingdom", "France", "Sweden", "Denmark", "Germany", "Italy", "United States"]
+old2new = Dict(
+    "Hungary" => "Hungary",
+    "United Kingdom" => "UK",
+    "France" => "France",
+    "Sweden" => "Sweden",
+    "Denmark" => "Denmark",
+    "Germany" => "Germany",
+    "Italy" => "Italy",
+    "United States" => "USA"
 )
-regions = values(old2new_names)
 
 function replacemissing(xs)
     for i in eachindex(xs)
@@ -53,12 +57,9 @@ end
 
 apple = @_ projectdir("data/apple/applemobilitytrends.csv") |>
     CSV.read(__, DataFrame) |>
-    filter(:country => x->!ismissing(x) , __) |>
-    # filter(:geo_type => ==("country/region"), __) |>
-    filter(:country => ==("Denmark") , __) |>
-    filter(:geo_type => ==("sub-region") , __) |>
-    # filter(:region => x-> x ∈ keys(old2new_names) , __) |>
-    transform(__, :region => ByRow(x -> old2new_names[x]) => :region) |>
+    filter(:geo_type => ==("country/region") , __) |>
+    filter(:region => ∈(regions) , __) |>
+    # transform(__, :region => ByRow(x -> old2new[x]) => :region) |>
     select(__, Not(["geo_type", "alternative_name", "sub-region", "country"])) |>
     DataFrames.stack(__, Not([:region, :transportation_type]), variable_name="date", value_name="mobility") |>
     unstack(__, :transportation_type, :mobility) |>
@@ -83,94 +84,22 @@ const new_mobility_names = [
 ]
 
 google = @_ "/home/and/data/google-mobility/Global_Mobility_Report.csv" |>
-    CSV.File(__) |>
-    DataFrame |>
-    filter(:country_region => ==("Denmark"), __) |>
-    filter( :sub_region_1 => x->!ismissing(x), __) |>
-    transform(__, :sub_region_1 => disallowmissing => :region) |>
-    filter(:sub_region_1 => x-> x ∈ keys(old2new_names) , __) |>
-    filter(:sub_region_2 => ismissing, __) |>
-    select(__, :date, :region, mobility_names .=> new_mobility_names) |>
-    select(__, All(), :region => ByRow(x -> old2new_names[x]) => :region) |>
+    CSV.read(__, DataFrame) |>
+    filter(:country_region => x -> x ∈ regions, __) |>
+    filter( :sub_region_1 => ismissing, __) |>
+    select(__, :date,
+        :country_region => :region, #ByRow(x -> old2new[x]) =>
+        mobility_names .=> new_mobility_names) |>
     select(__, All(), AsTable([:google_retail,:google_grocery,:google_workplaces]) => ByRow(mean) => :google)
 
 
 ## ============================================================================
-#                    telco
-#  ============================================================================
-eng2dan = Dict(
-        "Brondby" => "Brøndby",
-        "Copenhagen" => "København",
-        "Lyngby Taarbæk" => "Lyngby Taarbæk",
-        "Nordfyn" => "Nordfyns",
-        "Aarhus" => "Århus"
-    )
-
-kom2reg = @_ "/home/and/data/google-mobility/Global_Mobility_Report.csv" |>
-    CSV.File(__) |>
-    DataFrame |>
-    filter(:country_region => ==("Denmark"), __) |>
-    filter( :sub_region_1 => x->!ismissing(x), __) |>
-    filter( :sub_region_2 => x->!ismissing(x), __) |>
-    select(__, :sub_region_1 => :region, :sub_region_2 => :kommune) |>
-    disallowmissing |>
-    groupby(__, :kommune) |>
-    combine(__, unique) |>
-    select(__,
-        :region => ByRow(x -> old2new_names[x]) => :region,
-        :kommune => ByRow( x->string(first(split(x, " Municipality"))) ) => :kommune,
-    ) |>
-    transform(__, :kommune => ByRow( x-> x ∈ keys(eng2dan) ? eng2dan[x] : x ) => :kommune ) |>
-    transform(__, :kommune => ByRow( x->replace(x, "-"=>" ") ) => :kommune) |>
-    append!(__,
-        DataFrame( Dict(
-        "kommune" => ["Ærø", "Samsø", "Fanø", "Læsø"],
-        "region"  => ["south", "central", "south", "north"]
-    ))) |>
-    Dict([row.kommune => row.region for row in eachrow(__)])
-
-function json2long(raw)
-    num_kommunes = length(raw["locations"])
-    data = Array(hcat(raw["data"]...)')
-    source = string.(repeat(raw["locations"], inner=num_kommunes))
-    target = string.(repeat(raw["locations"], outer=num_kommunes))
-    dates = Date.(raw["dates"], DT)
-
-
-    df = DataFrame(
-        "date" => Vector{Date}(),
-        "source" => Vector{String}(),
-        "target" => Vector{String}(),
-        "flow" =>  Vector{Float64}()
-        )
-
-    for (d, flow) in zip(dates, eachcol(data))
-        append!(df, DataFrame( (; date = fill(d, num_kommunes^2), source, target, flow) ) )
-    end
-
-    return df
-end
-
-const DT = dateformat"yyyy-mm-dd HH:MM:SS"
-telco = @_ HTTP.get("https://covid19.compute.dtu.dk/data/telco_data.json") |>
-    String(__.body) |>
-    JSON.Parser.parse |>
-    json2long |>
-    transform(__, :source => ByRow(x->kom2reg[x]) => :source) |>
-    transform(__, :target => ByRow(x->kom2reg[x]) => :target) |>
-    filter(_.source == _.target, __) |>
-    select(__, :date, :source => :region, :flow => :telco) |>
-    groupby(__, [:date, :region]) |>
-    combine(__, :telco => sum => :telco)
-
-## ============================================================================
-#                    combine google, apple and telco
+#                    combine google and apple
 #  ============================================================================
 mobil = @_ outerjoin(apple, google; on=[:date,:region]) |>
-    outerjoin(__, telco; on=[:date,:region]) |>
     sort(__, :date) |>
     filter( Date("2020-02-15") <= _.date <= Date("2021-06-30"), __)
-CSV.write(projectdir("data/mobility/", "mobility_regional.csv"), mobil)
+CSV.write(projectdir("data/mobility/", "mobility_international.csv"), mobil)
 
 ## regional data sets
 
@@ -198,7 +127,7 @@ function postprocessing(df, window)
     for col in cols
         @info col
         smoothed[!,col] = rollingmean(df[:,col], window)
-        smoothed[!,col] ./= abs(smoothed[1,col])
+        smoothed[!,col] ./= smoothed[1,col] == 0 ? 1 : abs(smoothed[1,col])
         smoothed[!,col] .-= 1
         smoothed[!,col] ./= StatsBase.std(smoothed[!,col])
         if !all( isfinite.(smoothed[!,col]) )
@@ -237,9 +166,10 @@ regionalmobil = let
             disallowmissing |>
             assertconsistency
 
-        CSV.write(projectdir("data/mobility/", "mobility_region=$region.csv"), regional)
-        regionalmobil[region] = regional
+        CSV.write(projectdir("data/mobility/", "mobility_country=$(old2new[region]).csv"), regional)
+        regionalmobil[old2new[region]] = regional
     end
+    BSON.bson(projectdir("data/mobility/", "mobility_international.bson"), regionalmobil)
     regionalmobil
 end
 
@@ -248,14 +178,13 @@ using Plots
 plotlyjs()
 let
     ps = []
-    nplots = length(Regional.regions)
-    for region in regions
+    nplots = length(regionalmobil)
+    for (region, mob) in pairs(regionalmobil)
         mob = regionalmobil[region]
         p = plot(title="$region", xticks=:native)
         plot!(mob.date, mob.apple, lab="apple")
         plot!(mob.date, mob.google, lab="google")
         plot!(mob.date, mob.applegoogle, lab="apple-google")
-        plot!(mob.date, mob.telco, lab="telco")
         push!(ps,p)
     end
     plot(ps..., layout=(nplots,1), sharex=true, link=:x, size=(1000, nplots*250))
