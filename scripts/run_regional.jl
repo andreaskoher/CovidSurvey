@@ -95,9 +95,9 @@ parsed_args = parse_args(ARGS, argtable)
 data_params = (
       observationsend   = parsed_args["observations-end"]
     , predictors        = parsed_args["add-covariates"] |> CovidSurvey.parse_predictors
-    # , hospitmodel       = Regional.HospitInit1(obs_stop="2020-07-01")
-    , casemodel         = Regional.CaseInit1(obs_start=parsed_args["cases-start"])
-    , seromodel         = Regional.SeroInit2(delay=0, std=.5)
+    # , hospitmodel       = Regional.HospitInit(obs_stop="2020-07-01")
+    , casemodel         = Regional.CaseInit(obs_start=parsed_args["cases-start"])
+    , seromodel         = Regional.SeroInit(delay=0, std=.5)
     , rwstep           = parsed_args["rwstep"]
     , epidemicstart    = 20
     , numimpute        = 6
@@ -159,9 +159,9 @@ m();
 @time chain = let
     thinning = 10
     if ps.chains > 1
-        sample(m, NUTS(ps.warmup, 0.95; max_depth=6), MCMCThreads(), ps.steps + ps.warmup, ps.chains; progress=true, thinning)
+        sample(m, NUTS(ps.warmup, 0.99; max_depth=6), MCMCThreads(), ps.steps + ps.warmup, ps.chains; progress=true, thinning, save_state=true)
     else
-        sample(m, NUTS(ps.warmup, 0.95; max_depth=6), ps.steps + ps.warmup; progress=true, thinning) #; max_depth=15
+        sample(m, NUTS(ps.warmup, 0.99; max_depth=6), ps.steps + ps.warmup; progress=true, thinning, save_state=true) #; max_depth=15
     end
 end
 ## ==========================================================================
