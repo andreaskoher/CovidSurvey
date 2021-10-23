@@ -58,29 +58,58 @@ function startdate(df; epidemicstart = 30, epidemic_threshold = 30, regions = na
     df.date[start_idx] .- Day(epidemicstart)
 end
 
-enddate(df1, df2) = min(df1.date[end], df2.date[end])
+function enddate(df, args...)
+    isnothing(df) && enddate(args...)
+    min(df.date[end], enddate(args...))
+end
 
-enddate(df, args...) = min(df.date[end], enddate(args...))
-
+function enddate(df1, df2)
+    t1 = isnothing(df1) ? Date(10^5) : df1.date[end]
+    t2 = isnothing(df2) ? Date(10^5) : df2.date[end]
+    min(t1, t2)
+end
 # ============================================================================
 # make observables consistent
 # limit observations and add zero padding if necessary
 
-function consistent!(data; epidemicstart = 30, epidemic_threshold = 30)
+function consistent!(data; epidemicstart = 30, epidemic_threshold = 30, startdates = nothing)
     @unpack cases, hospit, deaths, regions = data
+    if isnothing(startdates)
+        startdates = startdate(hospit; epidemicstart, epidemic_threshold, regions)
+    elseif startdates isa Date
+        startdates = fill(startdates, length(regions))
+        epidemicstart = 1 # start epidemic with given startdate
+    else
+        @assert startdates isa Vector{Date}
+        epidemicstart = 1 # start epidemic with given startdates
+    end
     data["epidemicstart"] = epidemicstart
-    startdates = data["startdates"] = startdate(hospit; epidemicstart, epidemic_threshold, regions)
+    data["startdates"] = startdates
     s      = minimum(startdates)
     e      = enddate(deaths, cases, hospit)
     data["deaths"] = limit(deaths, s, e)
     data["hospit"] = limit(hospit, s, e)
     data["cases"]  = limit(cases, s, e)
     data["dates"]  = s:Day(1):e
-    @assert length(data["dates"]) == size(data["cases"],1) == size(data["hospit"],1) == size(data["deaths"],1)
+    # @assert length(data["dates"]) == size(data["cases"],1) == size(data["hospit"],1) == size(data["deaths"],1)
     return nothing
 end
 
-function limit(df::DataFrame, s::Date, e::Date, pad=true)
+# function consistent!(data; epidemicstart = Date("2020-06-01"))
+#     @unpack cases, hospit, deaths, regions = data
+#     data["epidemicstart"] = epidemicstart
+#     s      = epidemicstart
+#     e      = enddate(deaths, hospit, cases)
+#     data["deaths"] = limit(deaths, s, e)
+#     data["hospit"] = limit(hospit, s, e)
+#     data["cases"]  = limit(cases, s, e)
+#     data["dates"]  = s:Day(1):e
+#     # @assert length(data["dates"]) == size(data["cases"],1) == size(data["hospit"],1) == size(data["deaths"],1)
+#     return nothing
+# end
+
+function limit(df, s::Date, e::Date, pad=true)
+    isnothing(df) && return
     pad && df.date[1] > s && ( df = padzeros(df, s) )
     is = findfirst(==(s), df.date)
     ie = findlast(==(e), df.date)
@@ -130,6 +159,7 @@ end
 
 function df2vec(df, startdates, observationsend)
     vs = Vector{Vector{Int64}}()
+    isnothing(df) && return vs
     regions = names(df, Not(:date))
     for (s,r) in zip(startdates, regions)
         is = findfirst(==(s), df.date)
@@ -138,6 +168,12 @@ function df2vec(df, startdates, observationsend)
         push!(vs, v)
     end
     vs
+end
+
+function totaldays(dates, startdates)
+    observationsend = last(dates)
+    regional_dates = regional_timeseries(dates, startdates, observationsend)
+    return length.(regional_dates)
 end
 
 function regional_timeseries(dates, startdates, observationsend)
@@ -151,18 +187,12 @@ function regional_timeseries(dates, startdates, observationsend)
     ts
 end
 
-function totaldays(dates, startdates)
-    observationsend = last(dates)
-    regional_dates = regional_timeseries(dates, startdates, observationsend)
-    return length.(regional_dates)
-end
-
 # ============================================================================
 #                        COVARIATES
 # ============================================================================
 # main function
 function covariates!(data, predictors; covariates_kwargs...)
-    @unpack dates_turing, observationsend, num_regions = data
+    @unpack dates_turing, num_regions = data
     if isnothing(predictors)
         data["covariates"]       = [Array{Float64,2}(undef, 1,1) for i in 1:num_regions]
         data["num_covariates"]   = 0
@@ -170,38 +200,27 @@ function covariates!(data, predictors; covariates_kwargs...)
     else
         regional_covariates = Vector{Array{Float64,2}}()
         covariates_start_indices = Vector{Int64}()
+        covariates_end_indices = Vector{Int64}()
+
         for i in 1:num_regions
-            fname = covariates_kwargs[:fname][i]
-            fname_mobility = covariates_kwargs[:mobility][i]
             covariates = readcovariates(
-                ; fname
+                ; fname_survey = covariates_kwargs[:fname][i]
+                , fname_mobility = covariates_kwargs[:mobility][i]
                 , shift = covariates_kwargs[:shift]
-                , startdate = covariates_kwargs[:startdate]
-                # , enddate = covariates_kwargs[:enddate]
                 , datecol = covariates_kwargs[:datecol]
-                , mobility = fname_mobility
                 #, aggregation = covariates_kwargs[:aggregation]
             )
-            sort!(covariates, :date)
 
-            startdate = Date(covariates_kwargs[:startdate])
-            stopdate  = observationsend
+            limit!(covariates, data, covariates_kwargs[:conditions])
 
-            i_start = findfirst(==(startdate), covariates.date)
-            i_stop  = findfirst(==(stopdate), covariates.date)
-            @assert !isnothing(i_start)
-            @assert !isnothing(i_stop)
-
-            covariates = covariates[i_start:i_stop,:]
-            covariates = select_predictors(
+            covariates_array = select_predictors(
                               covariates, predictors
-                            ; standartize = covariates_kwargs[:standartize]
+                            ; standardize = covariates_kwargs[:standardize]
+                            , normalize = covariates_kwargs[:normalize]
             ) #num_obs+shift_covariates, num_tot
-            covariates = convert(Array{Float64,2}, covariates)
 
-            covariates_start_index = findfirst(==(startdate), dates_turing[i])
-
-            push!(regional_covariates, covariates)
+            covariates_start_index = findfirst(==(covariates.date[1]), dates_turing[i])
+            push!(regional_covariates, covariates_array)
             push!(covariates_start_indices, covariates_start_index)
         end
         data["covariates"] = regional_covariates
@@ -209,60 +228,66 @@ function covariates!(data, predictors; covariates_kwargs...)
         data["num_covariates"]   = size(regional_covariates[1],2)
         data["covariates_starts"] = covariates_start_indices
     end
+    return nothing
 end
 
 # ============================================================================
 # read covariates
 
 function readcovariates(
-        ; fname=nothing
+        ; fname_survey=nothing
+        , fname_mobility=nothing
         , shift=0
-        , startdate=nothing
-        , enddate=nothing
         , datecol=:date
-        , aggregation=1
-        , mobility=nothing
+        # , aggregation=1
         , kwargs...
 )
 
-    isnothing(fname) && (@error "please give a file name to covariates_kwargs")
-    surv = CSV.File(fname)|>DataFrame
-    rename!(surv, datecol=>"date")
-    surv.date += Day(shift)
-    surv = repeat(surv, inner=aggregation)
-    # ts = df.date[1] : Day(aggregation) : df.date[end]
-    #@assert all(df.date .== ts )
-    mobil = CSV.File(mobility) |> DataFrame
-    df = leftjoin(surv, mobil; on=:date)
+    @_ fname_survey |>
+        CSV.read(__, DataFrame) |>
+        DataFrames.rename!(__, datecol=>"date") |>
+        transform(__, :date =>( x -> x + Day(shift) )=> :date) |>
+        leftjoin(__,
+            CSV.read(fname_mobility, DataFrame); on=:date) |>
+        sort(__, :date)
+end
 
-    !isnothing(startdate) && filter!(row -> row.date >= Date(startdate), df)
-    !isnothing(enddate) && filter!(row -> row.date <= Date(enddate), df)
+function limit!(covariates, data, conditions)
+    @unpack observationsend = data
+    filter!(:date => x->x<=Date(observationsend), covariates)
+    if conditions isa Pair
+        filter!(conditions, covariates)
+    elseif conditions isa Vector && !isempty(conditions)
+        filter!.(conditions, Ref(covariates))
+    end
+    return nothing
+end
+
+function consistencycheck!(covariates, data)
     @assert issorted(df.date)
     @assert !any( ismissing.(Array(df)) )
     disallowmissing!(df)
-    #@assert all( isfinite.(Array(df)) )
-    return df
 end
 
 # ============================================================================
 # preprocess covariates
 
-function surveynorm!(xs; standartize=false)
+function surveynorm!(xs; standardize=false)
     i = findfirst(x->!ismissing(x), xs)
     xs[i] == 0. && return nothing
     xs ./= abs(xs[i])
     xs .-= xs[i]
-    standartize && (xs ./= std(xs))
+    standardize && (xs ./= std(xs))
     return nothing
 end
 
-function select_predictors(covariates, predictors, num_observations = nothing, num_tot = nothing; standartize=false)
+function select_predictors(covariates, predictors, num_observations = nothing, num_tot = nothing; standardize=false, normalize = true)
     predictors = String.(predictors)
 
     cov_names = filter(x->x!=="date", names(covariates))
     for k in cov_names
         covariates[!,k] = convert.(Float64, covariates[!,k])
-        surveynorm!(covariates[!,k]; standartize)
+        normalize && surveynorm!(covariates[!,k]; standardize)
         # if isnothing(num_observations) || isnothing(num_tot)
         #     surveynorm!(covariates[!,k]; standartize)
         # else
@@ -272,7 +297,8 @@ function select_predictors(covariates, predictors, num_observations = nothing, n
 
     miss = .!( in.(predictors, Ref(cov_names) ) )
     any(miss) && (@error "predictor $(predictors[miss]) not found. Select either nonresidential_mobility, residential_mobility or from survey: $(surveyvars)")
-    return Array( covariates[!,predictors] )
+    covdata = Array( covariates[!,predictors] )
+    return convert(Array{Float64,2}, covdata)
 end
 
 # ============================================================================
