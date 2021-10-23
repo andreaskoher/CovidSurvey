@@ -1,0 +1,17 @@
+echo Germany
+./rt.R --region Germany
+
+echo Italy
+./rt.R --region Italy
+
+echo Denmark
+./rt.R --region Denmark
+
+echo Sweden
+./rt.R --region Sweden
+
+echo USA 
+./rt.R --region USA
+
+echo Hungary
+./rt.R --region Hungary
