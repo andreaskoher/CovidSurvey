@@ -228,8 +228,9 @@ function load_data(;
         :startdate => nothing,
         :enddate => nothing,
         :aggregation => 1,
-        :mobility => nothing
-        :standartize => false
+        :mobility => nothing,
+        :standardize => false,
+        :normalize => true,
     )
 )
 
