@@ -50,11 +50,11 @@ argtable = ArgParseSettings(
     "--observations-end", "-o"
         help = "end of observation date as string yyyy-mm-dd. Use full data set by defaults"
         arg_type = String
-        default = "2021-02-01"
+        default = nothing
     "--cases-start", "-s"
         help = "start date for case observations as string yyyy-mm-dd. case observations start on 2020-06-01 by default"
         arg_type = String
-        default = "2020-06-01"
+        default = "2020-08-01"
     "--add-covariates", "-c"
         help = "list of covariate names (default empty string = no covariates). Choose: C: contacts, R:"
         arg_type = String
@@ -62,7 +62,7 @@ argtable = ArgParseSettings(
     "--model", "-m"
         help = "choose from: 'hospit', 'cases', 'deaths'. Defaul: 'hospit'"
         arg_type = String
-        default = "hospit"
+        default = "intdeaths"
     "--standardize", "-z"
         help = "normalize predictors to unit standard deviation"
         arg_type = Bool
@@ -78,7 +78,7 @@ argtable = ArgParseSettings(
         default = ""
     "--include-early-dynamics", "-i"
         arg_type = Bool
-        default = false
+        default = true
     "--semiparametric", "-S"
         arg_type = Bool
         default = true
@@ -86,6 +86,14 @@ argtable = ArgParseSettings(
         help = "random seed to use"
         arg_type = Int
         default = nothing
+    "--thinning"
+        help = "thinning"
+        arg_type = Int
+        default = 1
+    "--tree"
+        help = "max tree size"
+        arg_type = Int
+        default = 5
 end
 parsed_args = parse_args(ARGS, argtable)
 
@@ -96,28 +104,26 @@ data_params = (
       observationsend   = parsed_args["observations-end"]
     , predictors        = parsed_args["add-covariates"] |> CovidSurvey.parse_predictors
     # , hospitmodel       = Regional.HospitInit(obs_stop="2020-07-01")
-    , casemodel         = Regional.CaseInit(obs_start=parsed_args["cases-start"])
-    , seromodel         = Regional.SeroInit(delay=0, std=.5)
     , rwstep           = parsed_args["rwstep"]
-    , epidemicstart    = 20
-    , numimpute        = 6
+    , epidemicstart    = Date(parsed_args["cases-start"])
+    , numimpute        = 20
     , include_early_dynamic = parsed_args["include-early-dynamics"]
     , link              = KLogistic(4.5)
     , invlink           = KLogit(4.5)
     , covariates_kwargs = Dict(
+      :fname => [ projectdir("data/contacts/dk/", "averaged_contact_rates_region=$r.csv" ) for r in 1:Regional.nregions],
+      :mobility => [projectdir("data/mobility/mobility_region=$(Regional.regions[i]).csv") for i in 1:Regional.nregions],
       :semiparametric => parsed_args["semiparametric"],
-      :fname          => [projectdir("data/contacts/dk/", "averaged_contact_rates_region=$(r).csv" ) for r in 1:Regional.nregions],#[projectdir("data", "mean_contact_rates_region=$r.csv" ) for r in 1:Regional.nregions],
       :shift          => -1,
-      :conditions     => :date => x->x>Date("2020-11-10"), # >= 1000 cases / day
+      :startdate      => "2020-11-10", # >= 1000 cases / day
       :datecol        => "dates",
-      :aggregation    => parsed_args["rwstep"],
+      :aggregation    => 1,
       :standardize    => parsed_args["standardize"],
       :normalize      => true,
-      :mobility       => [projectdir("data/mobility/mobility_region=$(Regional.regions[i]).csv") for i in 1:Regional.nregions]
-      )
+    )
     )
 
-data = Regional.load_data(; data_params... )
+data = International.load_data(; data_params... )
 turing_data = data.turing_data;
 #----------------------------------------------------------------------------
 # prepare model
@@ -158,11 +164,11 @@ m();
 ## ==========================================================================
 # sampling
 @time chain = let
-    thinning = 10
+    thinning = parsed_args["thinning"]
     if ps.chains > 1
-        sample(m, NUTS(ps.warmup, 0.99; max_depth=6), MCMCThreads(), ps.steps + ps.warmup, ps.chains; progress=true, thinning, save_state=true)
+        sample(m, NUTS(ps.warmup, 0.99; max_depth=parsed_args["tree"]), MCMCThreads(), ps.steps + ps.warmup, ps.chains; progress=true, thinning, save_state=true)
     else
-        sample(m, NUTS(ps.warmup, 0.99; max_depth=6), ps.steps + ps.warmup; progress=true, thinning, save_state=true) #; max_depth=15
+        sample(m, NUTS(ps.warmup, 0.99; max_depth=parsed_args["tree"]), ps.steps + ps.warmup; progress=true, thinning, save_state=true) #; max_depth=15
     end
 end
 ## ==========================================================================

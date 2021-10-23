@@ -28,9 +28,9 @@ ps = (
     seed   = nothing,
     observ = "2021-03-01",#"2021-02-06",#"2021-03-25"
     chains = 1,
-    preds = nothing,#"CT,MG",#"CF,CC,CR,CS"
+    preds = "CS,MG,MA", #"CF,CC,CR,CS"
     semipara=true,
-    rwstep = 1,
+    rwstep = 7,
     include= false,
     std = false,
 )
@@ -54,17 +54,20 @@ data_params = (
     , predictive        = false
     , covariates_kwargs = Dict(
       :semiparametric => ps.semipara,
-      :fname          => [projectdir("data", "mean_contact_rates_region=$(r).csv" ) for r in 1:Regional.nregions],#[projectdir("data", "mean_contact_rates_region=$r.csv" ) for r in 1:Regional.nregions],
+      :fname          => [projectdir("data/contacts/dk/", "averaged_contact_rates_region=$(r).csv" ) for r in 1:Regional.nregions],#[projectdir("data", "mean_contact_rates_region=$r.csv" ) for r in 1:Regional.nregions],
       :shift          => -1,
-      :startdate      => "2020-11-10", # >= 1000 cases / day
+      :conditions     => :date => x->x>Date("2020-11-10"), # >= 1000 cases / day
       :datecol        => "dates",
       :aggregation    => ps.rwstep,
-      :standartize    => ps.std,
+      :standardize    => ps.std,
+      :normalize      => true,
       :mobility       => [projectdir("data/mobility/mobility_region=$(Regional.regions[i]).csv") for i in 1:Regional.nregions]
       )
     )
+
 data = Regional.load_data(; data_params... )
 d = turing_data = data.turing_data;
+
 ## ============================================================================
 @info "prepare model"
 
@@ -76,6 +79,7 @@ m = model(turing_data; vectorize=true)
 m();
 ## ============================================================================
 @info "start sampling"
+Turing.emptyrdcache()
 
 @time chain = let #460s; 366s
     thinning = 1
@@ -187,9 +191,10 @@ generated_posterior = Regional.posterior(model, turing_data, chains_params)
 @info "save"
 fdir = projectdir("reports/tmp", "$(today())")
 fname = Regional.save_results(fdir, ps, data, chain)
-
 ## ==========================================================================
 @info "post processing"
+using InlineStrings
+using WeakRefStrings
 Regional.postprocessing(fname; plot_results=false)
 ##
 # fname = "/home/and/dev/CovidSurvey/reports/regional_effect_estimation/mobility/apple_totalcontacts/2021-09-05/CHAIN_chains=10_model=hospit_observ=2021-02-01_preds=CT,MA_regional=true_rwstep=7_semipar=true_std=false_steps=500_warmup=2000.jls"
@@ -279,7 +284,7 @@ plot(recipe)
 @info "plot predictors"
 # pgfplotsx()
 # default(titlefontsize = 20, legendfontsize = 18, labelfontsize = 18, guidefontsize = 18, tickfontsize = 12, framestyle = :zerolines, yminorgrid = true)
-Regional.plot_effects(pp, gp; plot_results , grouped = false, effect_on_Rt = 0.)
+Regional.plot_effects(p, gp; plot_results , grouped = false, effect_on_Rt = 0.)
 Regional.plot_effects(p, gp; plot_results, grouped = false, effect_on_Rt = 2.)
 Regional.plot_effects(p, gp; plot_results, grouped = false, effect_on_Rt = -0.5)
 
@@ -421,102 +426,106 @@ gcf()
 
 ##
 TV = Vector{Float64}
+V = Float64
 vectorize = true
 θ = turing_data
-@unpack num_observations, num_total_days, num_regions, num_rt_steps, hospitmodel, invlink, seromodel, num_covariates, rwscale, include_early_dynamic = θ
+@unpack num_observations, num_total_days, num_regions, num_rt_steps, hospitmodel, seromodel, num_covariates, rwscale, include_early_dynamic = θ
 # If we don't want to predict the future, we only need to compute up-to time-step `num_obs_countries[m]`
 num_time_steps = num_observations
 
 ############# 2.) time varying reproduction number
 
-# κ          ~ truncated(Normal(0, 1.), 0, Inf)
-# R0s        ~ filldist(truncated(Normal(2., κ), 1., 5.), num_regions)
-# σ_rt       ~ truncated(Normal(0.15, .05), 0, .25)
-R0         = truncated(Normal(3.0, 0.5), 1., 4.5) |> rand
-R0s        = filldist(truncated(Normal(R0, 0.2), 1., 4.5), num_regions)  |> rand#CovidSurvey.CustomMvNormal1(R0, 0.2, 1., 4.5, num_regions) #filldist(truncated(Normal(R0, 0.2), 1., 4.5), num_regions)
-σ_rt       = truncated(Normal(0.15*rwscale, .05*rwscale), 0, .3*rwscale) |> rand
+R0_std     = truncated(Normal(0.5, 0.2), 0.01, Inf) |> rand
+R0         = truncated(Normal(3.5, 1.), 1., 4.5) |> rand
+R0s        = filldist(truncated(Normal(R0, R0_std), 1., 5.), num_regions) |> rand
+# R0         = truncated(Normal(3.0, 0.5), 0., 6.)
+# R0s        = filldist(truncated(Normal(R0, 0.2), 0., 6.), num_regions) #CovidSurvey.CustomMvNormal1(R0, 0.2, 1., 4.5, num_regions) #filldist(truncated(Normal(R0, 0.2), 1., 4.5), num_regions)
+σ_rt       = truncated(Normal(0.3*rwscale, .02*rwscale), 0, .5*rwscale) |> rand #N(0.32,0.5)
 
 init_rw = if include_early_dynamic
         R0s
     else
-        # R1s ~ filldist(truncated(Normal(.8, .1), .5, 1.1), num_regions)
-        R1  = truncated(Normal(0.8, 0.1), 0., 1.2) |> rand
-        R1s = filldist(GammaMeanCv(0.8, 0.05), num_regions) |> rand
+        # R1  = truncated(Normal(0.8, 0.1), 0., 2.)
+        # R1s = filldist(truncated(Normal(R1, 0.1), 0., 2.), num_regions)
+
+        R1_std    = truncated(Normal(0.1, .05), 0.05, Inf) |> rand
+        R1s       = filldist(truncated(Normal(0.8, R1_std), 0., 1.5), num_regions) |> rand
+        R1s
 end
 
 latent_Rts = if include_early_dynamic
     latent_Rts_z = [TV(undef, num_rt_steps[m]) for m in 1:num_regions]
     latent_Rts = [TV(undef, num_rt_steps[m]) for m in 1:num_regions]
     for m in 1:num_regions
-        latent_Rts_z[m] = CovidSurvey.RandomWalk(num_rt_steps[m])
+        latent_Rts_z[m] = CovidSurvey.RandomWalk(num_rt_steps[m]) |> rand
         @. latent_Rts[m] = latent_Rts_z[m] * σ_rt + invlink(init_rw[m])
     end
     latent_Rts
 else
     n = first( num_rt_steps )
     latent_Rts_z = filldist( CovidSurvey.RandomWalk( n ), num_regions) |> rand
-    Regional.rescale( latent_Rts_z, σ_rt, invlink.(init_rw) )
+    CovidSurvey.rescale( latent_Rts_z, σ_rt, θ.invlink.(init_rw) )
 end
-findall(isnan, latent_Rts_z)
+# latent_Rts_z = [TV(undef, num_rt_steps[m]) for m in 1:num_regions]
+# latent_Rts = [TV(undef, num_rt_steps[m]) for m in 1:num_regions] |> rand
+# for m in 1:num_regions
+# 	latent_Rts_z[m] = RandomWalk(num_rt_steps[m])
+# 	latent_Rts[m] = latent_Rts_z[m] * σ_rt .+ invlink(init_rw[m])
+# end
 
 Rts = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
 if num_covariates > 0
-    grouped_effects = filldist( Laplace(0,0.2), num_covariates) |> rand
+    grouped_effects = filldist( Laplace(0,0.2), num_covariates) |> rand #Exponential(0.2)
     effect_std = filldist( GammaMeanCv(0.1, 0.5), num_covariates) |> rand
     effects_z = filldist( MvNormal( num_covariates, 1.), num_regions) |> rand
     effects = [ effects_z[:,m] .* effect_std .+ grouped_effects for m in 1:num_regions]
 
-    # grouped_effect ~ filldist( Exponential(0.2), num_covariates)
-    # effect_std ~ filldist( GammaMeanCv(0.1, 0.5), num_covariates)
+    # grouped_effect = filldist( Exponential(0.2), num_covariates)
+    # effect_std = filldist( GammaMeanCv(0.1, 0.5), num_covariates)
     # pooled_effects_distr_raw = Normal.( grouped_effect, effect_std )
     # pooled_effects_distr = arraydist( truncated.( pooled_effects_distr_raw, zero(V), V(Inf) ) )
-    # effects ~ filldist( pooled_effects_distr, num_regions )
+    # effects = filldist( pooled_effects_distr, num_regions )
 
     if θ.semiparametric
-        Regional.semiparametric!(Rts, θ, false, latent_Rts, R0s, σ_rt, effects)
+        CovidSurvey.semiparametric!(Rts, θ, false, latent_Rts, R0s, σ_rt, effects)
     else
-        Regional.mixed!(Rts, θ, false, latent_Rts, R0s, σ_rt, effects)
+        CovidSurvey.mixed!(Rts, θ, false, latent_Rts, R0s, σ_rt, effects)
     end
 else
-    Regional.random_walks!(Rts, θ, false, latent_Rts, R0s, σ_rt)
+    CovidSurvey.random_walks!(Rts, θ, false, latent_Rts, R0s, σ_rt)
 end
-findall(isnan, Rts[5])
-
+m = 1
+plot(latent_Rts[:,m])
+plot(d.dates[m], Rts[m])
 ############ 3.) infection dynamics
 τ  = Exponential(20) |> rand# `Exponential` has inverse parameterization of the one in Stan
 T  = typeof(τ)
-ys = filldist(truncated(Normal(τ, 30),T(0),T(500)), num_regions) |> rand
+# ys = filldist(truncated(Normal(τ, 30),T(1),T(500)), num_regions)
+ys = filldist(Exponential(τ), num_regions) |> rand
 
 newly_infecteds      = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
 cumulative_infecteds = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
 # effective_Rts        = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
 
-Regional.infections!(newly_infecteds, cumulative_infecteds, θ, ys, Rts)
-
-let
-    i = 1
-    plot(cumulative_infecteds[i], yticks=:native)
-    hline!([hospitmodel.populations[i]])
-end
-plot(newly_infecteds[5], yticks=:native)
-# findall(isnan, newly_infecteds[5])
-
+CovidSurvey.infections!(newly_infecteds, cumulative_infecteds, θ, ys, Rts)
+plot(d.dates[m], newly_infecteds[m], yticks=:native)
 # infections!(newly_infecteds, cumulative_infecteds, effective_Rts, θ, τ, ys, Rts)
 ########### 4.) derive observables
 μ_i2h = truncated(Normal(11.7, .5), 8, 14) |> rand
 σ_i2h = truncated(Normal(6.5,0.5), 1, 14) |> rand
-ihr   = GammaMeanCv(0.025, 0.1) |> rand#truncated(Normal(1.8/100,0.5/100), 1/100, 5/100)
+ihr   = truncated(Normal(1.8/100,0.5/100), 0.5/100, 5/100) |> rand #GammaMeanCv(0.025, 0.1)
 ϕ_h   = truncated(Normal(50, 10), 20, Inf) |> rand
 
 expected_daily_hospit    = TV[TV(undef, num_time_steps[m]) for m in 1:num_regions]
-hospit_observation_model = Regional.SimpleObsModel2(hospitmodel, μ_i2h, σ_i2h, ihr, ϕ_h, expected_daily_hospit, vectorize)
-sero_observation_model   = Regional.SimpleSeroObsModel(seromodel, cumulative_infecteds)
-Regional.expected!(hospit_observation_model, newly_infecteds)
-plot(expected_daily_hospit[5], yticks=:native)
-all(isfinite.(expected_daily_hospit[5]))
+hospit_observation_model = CovidSurvey.SimpleObsModel2(hospitmodel, μ_i2h, σ_i2h, ihr, ϕ_h, expected_daily_hospit, vectorize)
+# hospit_observation_model = CovidSurvey.SimpleObsModel(hospitmodel, μ_i2h, ihr, ϕ_h, expected_daily_hospit, vectorize)
+sero_observation_model   = CovidSurvey.SimpleSeroObsModel(seromodel, cumulative_infecteds)
+CovidSurvey.expected!(hospit_observation_model, newly_infecteds)
+plot(d.dates[m], expected_daily_hospit[m], yticks=:native)
+
 ########### 4.) compare model to observations
 ## 4.1) observe hospitalizations
 
-ℓ  = 0.
-ℓ += logpdf(hospit_observation_model, θ.hospits)
-ℓ += logpdf(sero_observation_model, θ.sero)
+ℓ  = zero(V)
+ℓ += CovidSurvey.logpdf(hospit_observation_model, θ.hospits)
+ℓ += CovidSurvey.logpdf(sero_observation_model, θ.sero)

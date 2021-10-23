@@ -15,6 +15,14 @@ using PrettyTables
 using DataFrames
 using BSON
 
+using Turing
+using Memoization
+using ReverseDiff
+using InlineStrings
+using WeakRefStrings
+Turing.setrdcache(true)
+setadbackend(:reversediff)
+
 plotlyjs()
 #-----------------------------------------------------------------------------
 # read input
@@ -46,4 +54,12 @@ Regional.postprocessing(
     plot_results = parsed_args["plot-results"],
     exclude,
     warmup = parsed_args["warmup"]
+)
+
+fname = "/home/ankoh/dev/CovidSurvey/reports/regional_effect_estimation/mobility/apple_google_totalcontacts/2021-10-06/CHAIN_chains=10_model=hospit_observ=2021-02-01_preds=CS,MG,MA_regional=true_rwstep=7_semipar=true_std=false_steps=1000_warmup=2000.jls"
+isfile(fname)
+Regional.postprocessing(
+    fname;
+    plot_results = false,
+    exclude = [],
 )
