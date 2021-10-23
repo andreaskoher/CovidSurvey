@@ -9,6 +9,7 @@ using Dates
 using StatsBase
 using Distributions
 using CovidSurvey
+using Underscores
 # using Gadfly
 using StatsPlots
 using LaTeXStrings
@@ -78,6 +79,82 @@ function main()
 end
 
 # main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## =============================================================================
+# apply simple average
+
+function rollingmean(xs, window)
+    n  = length(xs)-window+1
+    ys = Vector{Float64}(undef, n)
+    for i in 1:n
+        ys[i] = mean(xs[i:i+window-1])
+    end
+    return ys
+end
+
+function smoothing(df, window)
+    @assert isodd(window)
+    Δ = window ÷ 2
+    smoothed = DataFrame( :date => df.date[1+Δ:end-Δ] )
+    cols = filter(x->nonmissingtype( eltype( df[!,x] ) ) <: Number, names(df))
+    for col in cols
+        smoothed[!,col] = rollingmean(df[:,col], window)
+    end
+    smoothed
+end
+
+ps = (
+    threshold = (family=50, colleagues=100, friends=100, strangers=1000),
+    window = 7,
+    fname = normpath( homedir(), "data/covidsurvey/rawcontacts.csv"),
+    ctypes = [:family, :colleagues, :friends, :strangers],
+)
+
+function main(ps)
+    contacts = @_ ps.fname |>
+        readcontacts |>
+        filteroutliers(__, ps.threshold) |>
+        groupby(__, :date, sort = true) |>
+        combine(__, ps.ctypes .=> sum, nrow, renamecols = false) |>
+        DataFrames.select(__, All(), AsTable(ps.ctypes) => ByRow(sum) => :total) |>
+        transform(__, [ps.ctypes..., :total] .=> ( x -> x ./ __.nrow ), renamecols = false) |>
+        disallowmissing |>
+        smoothing(__, ps.window)
+
+    save(projectdir("data/contacts/dk","smoothed_contact_rates_window=$(ps.window).csv"), contacts)
+    return contacts
+end
+
+contacts = main(ps)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## =========================================================================================================
 @info "load data"
