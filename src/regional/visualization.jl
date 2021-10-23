@@ -27,7 +27,7 @@ struct ObservationWithPredictorsPlottingRecipe1{Tsd, Ted, To, Te, Tp, Tl, Psd} <
 end
 
 function expected(data, gp, region, label)
-    @assert label in ["cases", "hospitalizations", "deaths"]
+    @assert label in ["cases", "hospitalizations", "deaths", "infections"]
     i  = region isa Integer ? region : findfirst(==(region), data.regions)
     dates = data.dates[i]
     if label == "cases"
@@ -39,29 +39,31 @@ function expected(data, gp, region, label)
     elseif label == "hospitalizations"
         values = gp.expected_daily_hospits[i]
         return (; dates, values )
-    else
+    elseif label == "deaths"
         values = gp.expected_daily_deaths[i]
+        return (; dates, values )
+    else
+        values = gp.newly_infecteds[i]
         return (; dates, values )
     end
 end
 
 function observed(data, region, label)
-    @assert label in ["cases", "hospitalizations", "deaths"]
+    @assert label in ["cases", "hospitalizations", "deaths", "infections"]
     i = region isa Integer ? region : findfirst(==(region), data.regions)
     r = region isa Integer ? Regional.regions[region] : region
-    dates = data.hospit.date
-    values = if label == "cases"
-        data.cases[:,r]
+    dates, values = if label == "cases"
+        data.cases.date, data.cases[:,r]
     elseif label == "hospitalizations"
-        data.hospit[:,r]
+        data.hospit.date, data.hospit[:,r]
     else
-        data.deaths[:,r]
+        data.deaths.date, data.deaths[:,r]
     end
     return (; dates, values )
 end
 
 function predicted(data, gp, region, label)
-    @assert label in ["cases", "hospitalizations", "deaths"]
+    @assert label in ["cases", "hospitalizations", "deaths", "infections"]
     i  = region isa Integer ? region : findfirst(==(region), data.regions)
     dates = data.dates[i]
     if label == "cases"
@@ -124,8 +126,8 @@ function Plots.plot!(p::Plots.Plot, r::ObservationPlottingRecipe1; plot_only_fit
     sd = r.startdate
 
     if !plot_only_fit
-        vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
-        vline!(p, [sd], lab="start observations", lw=2, lc=:black, hover="$sd", ls=:dash)
+        !isnothing(ed) && vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+        !isnothing(ed) && vline!(p, [sd], lab="start observations", lw=2, lc=:black, hover="$sd", ls=:dash)
     end
     plot!(p, o.dates, o.values, α=0.5, lc=:match, lab="observed $(r.label)", c=:midnightblue, lw=4, ylab="cases")
     plot_confidence_timeseries!(p, pr.dates, pr.values; label = "predicted $(r.label)", c=:midnightblue) #Dict(hover=>strdates)
@@ -149,8 +151,8 @@ function Plots.plot!(p::Plots.Plot, r::ObservationWithPredictorsPlottingRecipe1;
     psd= r.pstartdate
 
     if !plot_only_fit
-        vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
-        vline!(p, [sd], lab="start observations", lw=2, lc=:black, hover="$sd", ls=:dash)
+        !isnothing(ed) && vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+        !isnothing(ed) && vline!(p, [sd], lab="start observations", lw=2, lc=:black, hover="$sd", ls=:dash)
     end
     vspan!(p, [psd, ed], label="fit to survey data", α=0.2, fc=:midnightblue)
     bar!(p, o.dates, o.values, α=0.5, lc=:match, lab="observed $(r.label)", c=:midnightblue, lw=4, ylab="cases")
@@ -166,6 +168,41 @@ function Plots.plot!(p::Plots.Plot, r::ObservationWithPredictorsPlottingRecipe1;
     return p
 end
 
+# ============================================================================
+# latent infections
+struct LatentInfectionsPlottingRecipe3{Ted, Te, Tl} <: PlottingRecipe
+    enddate   ::Ted
+    expected  ::Te
+    label     ::Tl
+end
+
+function LatentInfectionsPlottingRecipe3(data::CovidSurvey.Data, gp, region, label)
+    e = expected(data, gp, region, label)
+    ed = data.observations_end
+    #isnothing(data.predictors) &&
+    return LatentInfectionsPlottingRecipe3( ed, e, label)
+    #pstartdate = Date("2020-11-10")
+    #return LatentInfectionsPlottingRecipe1( ed, e, p, label, pstartdate)
+end
+
+function Plots.plot!(p::Plots.Plot, r::Regional.LatentInfectionsPlottingRecipe3; plot_only_fit=false)
+    e  = r.expected
+    ed = r.enddate
+
+    if !plot_only_fit
+        !isnothing(ed) && vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+    end
+    ylabel!("cases")
+    plot_confidence_timeseries!(p, e.dates, e.values; label = "latent $(r.label)") #Dict(hover=>strdates)
+    if plot_only_fit
+        xlo = Dates.value(e.dates[1])
+        xup = Dates.value.(ed)
+        # yup = maximum( e.values[e.dates .< ed] ) * 1.1
+        xlims!(p, xlo, xup)
+        # ylims!(p, 0, yup)
+    end
+    return p
+end
 # ============================================================================
 # seropos
 
@@ -241,7 +278,7 @@ function RtPlottingRecipe1(data::CovidSurvey.Data, generated_posterior, region, 
     dates      = data.dates[i]
     values     = generated_posterior.Rts[i]
     expected   = (; dates, values )
-    lo = Date(data.lockdown)
+    lo = isnothing(data.lockdown) ? nothing : Date(data.lockdown)
     sd = first(data.dates[i])
     ed = Date(data.observations_end)
 
@@ -257,8 +294,8 @@ function Plots.plot!(p::Plots.Plot, r::RtPlottingRecipe1; plot_only_fit = false)
     lo = r.lockdown
 
     if !plot_only_fit
-        vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
-        vline!(p, [lo], lab="lockdown", lw=2, lc=:black, hover="$lo", ls=:dash)
+        !isnothing(ed) && vline!(p, [ed], lab="end observations", lw=2, lc=:black, hover="$ed")
+        !isnothing(lo) && vline!(p, [lo], lab="lockdown", lw=2, lc=:black, hover="$lo", ls=:dash)
     end
     plot_confidence_timeseries!(p, e.dates, e.values; label = r.label) #Dict(hover=>strdates)
     if plot_only_fit
@@ -368,7 +405,7 @@ function RtsPlottingRecipe(data::CovidSurvey.Data, generated_posterior)
     dates      = data.dates
     samples    = generated_posterior.Rts
     expecteds  = [(dates = d, values = g) for (d,g) in zip(dates, samples)]
-    lockdown   = Date(data.lockdown) # NOTE use data["lockdown"] instead
+    lockdown   = isnothing(data.lockdown) ? nothing : Date(data.lockdown) # NOTE use data["lockdown"] instead
     startdates = first.(data.dates)
     enddate    = Date(data.observations_end) # NOTE use data["observations_end"] instead
     RtsPlottingRecipe( lockdown, startdates, enddate, data.regions, expecteds)

@@ -27,8 +27,8 @@ function plot_confidence_timeseries!(p::Plots.AbstractPlot, time::AbstractVector
     qs = [quantile(v, intervals) for v in eachrow(data)]
     llq, lq, mq, uq, uuq = (eachrow(hcat(qs...))..., )
     strtime = time .|> Symbol .|> String
-    plot!(time, mq, ribbon=(mq - llq, uuq - mq), c=c, α=0.5, linewidth=0, label=(no_label ? "" : "$(label) (95% quantiles)"), hover=strtime, kwargs...)
-    #plot!(time, mq, ribbon=(mq - lq, uq - mq), c=c, α=0.5, linewidth=2, label=(no_label ? "" : "$(label) (50% quantiles)"), hover=mq, kwargs...)
+    #plot!(time, mq, ribbon=(mq - llq, uuq - mq), c=c, α=0.5, linewidth=0, label=(no_label ? "" : "$(label) (95% quantiles)"), hover=strtime, kwargs...)
+    plot!(time, mq, ribbon=(mq - lq, uq - mq), c=c, α=0.5, linewidth=2, label=(no_label ? "" : "$(label) (50% quantiles)"), hover=mq, kwargs...)
 
     return p
 end
