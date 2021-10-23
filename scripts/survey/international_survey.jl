@@ -9,6 +9,8 @@ using Plots
 using BSON
 using StatsBase
 using Underscores
+using ColorSchemes
+colors = ColorSchemes.tableau_10.colors
 # using Makie
 # using GLMakie
 # GLMakie.activate!()
@@ -190,11 +192,21 @@ function main(param)
 end
 contacts = main(param)
 
+## plot
+
 let
     for (region, data) in pairs(contacts)
         p = scatter(data.date, data.total, title=region)
         plotweeks!(p, data.date) |> display
     end
+end
+
+# plot raw data
+let
+    rawcontacts = readcontacts( param.fname )
+    region = "Denmark"
+    rawregional = filter(:region => ==(region), rawcontacts)
+    scatter(rawregional.date, rawregional.strangers, mα=0.1, mc=colors[2], msc=:match)
 end
 
 for (region, data) in pairs(contacts)
@@ -321,7 +333,7 @@ end
 function build_model(θ::NamedTuple)
     GP(
         θ.s1 * SqExponentialKernel() ∘ ScaleTransform(1/θ.l1) +
-        θ.s2 * SqExponentialKernel() ∘ ScaleTransform(1/θ.l2)
+        θ.s2 * SqExponentialKernel() ∘ ScaleTransform(1/14)
         # θ.s2 * RationalQuadraticKernel(α = θ.α) ∘ ScaleTransform(1/θ.l2)
     )
 end
@@ -336,10 +348,22 @@ function smooth(param::NamedTuple)
         aggregated_contacts = preprocess(rawcontacts, param, region)[2:end,:]
         smoothed = smooth(aggregated_contacts, param, title=region)
         contacts[region] = smoothed
-        CSV.write(projectdir("data/contacts/int/smoothed_contact_rates_region=$(region).csv"), regional)
+        CSV.write(projectdir("data/contacts/int/smoothed_contact_rates_region=$(region).csv"), smoothed)
     end
     bson(projectdir("data/contacts/int/smoothed_contact_rates.bson"), contacts)
     return contacts
 end
 
 smoothed_contacts = smooth(param)
+
+## ==========================================================================
+# replace Denmark with high resolution data
+let
+    den_lofi = @_ CSV.read(projectdir("data/contacts/int/smoothed_contact_rates_region=Denmark.csv"), DataFrame) |>
+        rename(__, Dict(
+            col => "$(col)_low_resolution" for col in filter(x->eltype( __[!,x] ) <: Number, names(__))
+        ))
+    den_hifi = CSV.read(projectdir("data/contacts/dk","smoothed_contact_rates_window=7.csv"), DataFrame)
+    den = leftjoin(den_hifi, den_lofi; on=:date, validate=(true, true), )
+    CSV.write(projectdir("data/contacts/int/smoothed_contact_rates_region=Denmark.csv"), den)
+end
