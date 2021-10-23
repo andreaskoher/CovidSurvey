@@ -26,6 +26,8 @@ using LaTeXStrings
 using ArviZ
 import PyPlot as plt
 using Underscores
+using WeakRefStrings
+using InlineStrings
 
 # using QuadGK
 # using
