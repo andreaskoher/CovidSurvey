@@ -14,10 +14,11 @@ Distributions.rand(rng::AbstractRNG, d::RandomWalk{Tn, Ts, Tx}) where {Tn, Ts, T
 end
 
 Distributions._rand!(rng::AbstractRNG, d::RandomWalk, x::AbstractVector) = begin
-	x[1] = rand(Normal(d.x0, d.s))
-	for i in 2:d.n
-		x[i] = rand(Normal(x[i-1], d.s))
-	end
+	# x[1] = rand(Normal(d.x0, d.s))
+	# for i in 2:d.n
+	# 	x[i] = rand(Normal(x[i-1], d.s))
+	# end
+	x[1:d.n] = randn(d.n)*1e-2
 	return nothing
 end
 
@@ -125,7 +126,7 @@ Hence, the resulting map is `(μ, ϕ) ↦ NegativeBinomial(ϕ, 1 / (1 + μ / ϕ)
 function NegativeBinomial2(μ, ϕ)
     p = 1 / (1 + μ / ϕ)
     r = ϕ
-	# !(0 < p <= 1) && (@show "$μ $ϕ")
+	# !(0 < p <= 1) && (println("μ:$(μ.value) ϕ:$(ϕ.value)"))
     return NegativeBinomial(r, p)
 end
 
