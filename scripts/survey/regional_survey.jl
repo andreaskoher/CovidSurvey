@@ -2,7 +2,7 @@ using DrWatson
 quickactivate(@__DIR__)
 @show projectdir()
 ##
-using CSV
+using CSV#
 using DataFrames
 using Turing
 using Dates
@@ -19,6 +19,7 @@ using TransformVariables, LogDensityProblems
 using Optim
 using ReverseDiff
 using BSON
+using Underscores
 import TimeSeriesDecompositions as TSD
 plotlyjs()
 
@@ -119,13 +120,38 @@ main(7)
 
 ## =========================================================================================================
 #  Simple data cleaning with mean instead of zero inflated Negative Binomial
+function rollingmean(xs::AbstractVector, window)
+    n  = length(xs)-window+1
+    ys = Vector{Float64}(undef, n)
+    for i in 1:n
+        x = xs[i:i+window-1]
+        ys[i] = mean(skipmissing(x))
+        @assert isfinite(ys[i]) "infinite at i=$i"
+    end
+    return ys
+end
+
+function rollingmean(df, window)
+    @assert isodd(window)
+    Δ = window ÷ 2
+    smoothed = DataFrame( :date => df.date[1+Δ:end-Δ] )
+    for col in names(df, Not(:date))
+        @info col
+        smoothed[!,col] = rollingmean(df[:,col], window)
+        @assert all( isfinite.(smoothed[!,col]) ) "$(findall(x-> !isfinite(x), smoothed[!,col]))"
+    end
+    smoothed
+end
+
 function main(aggregate=1)
     plotlyjs()
+    threshold = (family=50, colleagues=100, friends=100, strangers=1000)
     @progress for region in 1:5
         @info "load data region $region"
-        rawcontacts = readcontacts( normpath( homedir(), "data/covidsurvey/rawcontacts.csv"), select_region=region )
-        threshold = (family=50, colleagues=100, friends=100, strangers=1000)
-        contacts = filteroutliers(rawcontacts, threshold) #NOTE National: p = 99.9
+        contacts = @_ normpath( homedir(), "data/covidsurvey/rawcontacts.csv") |>
+            readcontacts(__ , select_region=region ) |>
+            filteroutliers(__, threshold) #NOTE National: p = 99.9
+
         contacts[!,:date] = sampledown(contacts.date, aggregate)
         contacts[!,:total] .= 0
         for c in ctype
@@ -134,10 +160,13 @@ function main(aggregate=1)
         # contacts = contacts[:, [:total, :strangers, :date]]
 
 
-        gp = groupby(contacts, :date; sort=true)
-        contactrates = combine(gp, names(gp, Not("date")) .=> mean; renamecols=false)
-        rename!(contactrates, "date"=>"dates")
-        save(projectdir("data","mean_contact_rates_region=$(region)_aggregation=$(aggregate).csv"), contactrates)
+        contactrates = @_ contacts |>
+             groupby(__, :date; sort=true) |>
+             combine(__, names(__, Not("date")) .=> mean; renamecols=false) |>
+             rollingmean(__, 7) |>
+             rename(__, "date"=>"dates")
+
+        save(projectdir("data/contacts/dk","averaged_contact_rates_region=$(region).csv"), contactrates)
 
 
         # @info "decomposition region $region"
@@ -146,4 +175,4 @@ function main(aggregate=1)
     end
 end
 
-main(7)
+main(1)
